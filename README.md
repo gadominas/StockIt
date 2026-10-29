@@ -6,11 +6,11 @@
 
 **Track. Read. Decide.**
 
-Your stocks, the news around them and a plain-English story of what's going on.<br>Prices, key numbers explained, headlines and the crowd's mood, with an optional AI briefing every day.
+Your stocks, the news around them and a plain-English story of what's going on.<br>Prices, key numbers explained, a Flash of top headlines with a TL;DR for each, and an optional AI briefing you can listen to.
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.1.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -60,11 +60,20 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 
 - **It opens on your money.** Portfolio value, today's change and the gain since you bought, before anything else.
 - **It explains instead of dumping data.** Tap any number, such as P/E or beta, to see what it means in plain words. The briefing and stories read like a short newspaper piece, with numbered links to the headlines they use.
+- **News in a flash.** The Flash tab puts each stock next to its top three headlines. Tap one for a TL;DR and what it could mean for the stock, then open the source only if it's worth it.
+- **Listen instead of reading.** Have the briefing, a stock's story, a TL;DR or the whole Flash read aloud while you walk or drive.
 - **One place for the news.** Yahoo Finance, the wider web through Google News, and the crowd's mood from StockTwits, for each stock you own or watch.
 - **Bring your stocks in fast.** Paste a list, open your broker's CSV export, or take a screenshot of Apple's Stocks app; no typing ticker by ticker.
 - **Yours.** No account, no tracking, no subscription. Your data stays in your iCloud Drive and AI runs on your own key, with every token counted.
 
 ## A quick tour
+
+<p align="center">
+  <img src="docs/screenshots/16-flash.png" width="250" alt="Flash: each stock on the left with its top three headlines on the right">&nbsp;
+  <img src="docs/screenshots/17-tldr.png" width="250" alt="A TL;DR of an NVIDIA headline: the gist, key points and what it could mean for NVDA">&nbsp;
+  <img src="docs/screenshots/18-listen.png" width="250" alt="The TL;DR being read aloud, with the player bar at the bottom and Read the full article">
+</p>
+<p align="center"><sub><b>⚡ Flash</b>: every stock with its top headlines · <b>TL;DR</b> of any headline · <b>🔊 Listen</b>, then read the full article</sub></p>
 
 <p align="center">
   <img src="docs/screenshots/02-briefing.png" width="250" alt="The full daily briefing, with what to keep an eye on and the count of buy, hold and sell views">&nbsp;
@@ -101,6 +110,9 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings. |
 | 📊 **A page per stock** | 1M, 6M, 1Y and 5Y chart, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
+| ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Headlines are ranked by how recent they are, how well known the source is, and whether they name the company. |
+| ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
+| 🔊 **Read aloud** | **Listen** to the briefing, a stock's story, any TL;DR or the whole Flash. Pause, skip or stop from the player at the bottom. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
 | ✦ **A story per stock** | What the company does, what's happening now and why, whether the price looks cheap or expensive, why buy, what could go wrong and what to watch, with numbered links to its sources. |
@@ -113,6 +125,36 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Flash news and TL;DRs
+
+<img src="docs/screenshots/17-tldr.png" width="250" align="right" alt="A TL;DR of a headline with Listen and Read the full article">
+
+Open the **Flash** tab for a two-minute scan of everything you own and watch: each stock with its price move on the left, its top headlines on the right (three by default, 1 to 5 in **Settings › Headlines**).
+
+Tap a headline to open its **TL;DR**:
+
+- **The gist** in one sentence, then the **key points** and **what it could mean** for the stock.
+- **✦ AI summary** when you have a key, labelled with the provider. Without a key, Stockit picks the key sentences from the article itself, labelled **no AI**.
+- **Listen** reads it aloud. **Read the full article at …** opens the original at the publisher.
+- **More about** the same stock is listed underneath, one tap away.
+
+Some articles can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
+
+<br clear="right">
+
+## Read aloud
+
+<img src="docs/screenshots/19-listening.png" width="250" align="right" alt="Settings › Listening: choose iPhone voice or AI voice">
+
+Tap **Listen** on the briefing, a stock's story, a TL;DR or the Flash tab. A player bar appears at the bottom with pause, next and stop; the item being read is marked in Flash.
+
+Choose the voice in **Settings › Listening**:
+
+- **iPhone voice:** free and offline. Filter female or male voices, set speed and pitch. For more natural voices, download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices.
+- **✦ AI voice:** OpenAI's speech models, with a choice of voices and a style such as "calm newsreader". This needs an OpenAI key, even when Claude writes your briefing, because Claude's API has no speech output. Characters sent are counted under Token usage as *Read aloud*.
+
+<br clear="right">
 
 ## Home-screen widget
 
@@ -140,7 +182,7 @@ AI is optional. Without it, everything else works: prices, numbers and their exp
 
 - **Your key, your choice.** Add a Claude or OpenAI key in **Settings › AI settings**, tap **Load my models**, and pick any model your account can use. Switch providers any time.
 - **You see the cost.** Token usage is counted per provider, feature, model and day, with a 14-day chart.
-- **It only runs when it helps.** The briefing is one request after a refresh, at most every few hours. Stories, ideas and screenshot import run only when you tap them.
+- **It only runs when it helps.** The briefing is one request after a refresh, at most every few hours. Stories, TL;DRs, ideas, AI voices and screenshot import run only when you tap them.
 - **Your investing style.** **Settings › AI advice** sets Cautious, Balanced or Adventurous; it shapes the views and the ideas.
 - **Clearly labelled.** Everything AI-written carries a **✦ AI** label and the name of the provider that wrote it, and every view says it is not financial advice.
 
@@ -158,6 +200,11 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Get a stock's story and view | Open the stock and tap **Write the story** |
 | Find new ideas | Open **✦ Ideas** and tap **Find new ideas**; **Add to watchlist** keeps one |
 | Change shares or move a stock | Open the stock › **Manage** › **Edit shares**, **Move to watchlist** or **Remove** |
+| Scan the news | Open **Flash** |
+| Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
+| Read the whole article | In the TL;DR, tap **Read the full article at …** |
+| Listen instead of reading | Tap **Listen** on the briefing, a story, a TL;DR or Flash. Pause, skip or stop from the player |
+| Change the voice | **Settings › Listening**: **iPhone voice** or **✦ AI voice**, then **Test the voice** |
 | Refresh prices and news | Tap refresh |
 | Change anything else | Tap **Settings** |
 
@@ -187,8 +234,8 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 - **Everything runs on your phone.** There is no Stockit server and nothing is collected.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
 - **Your keys** (Claude, OpenAI and the optional Finnhub key) are stored in the iOS Keychain and only ever sent to the service they belong to.
-- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), so it can talk about your money. Only when a feature needs it, and only to the provider you chose.
-- **Network requests** go to Yahoo Finance, Google News and StockTwits for data, Finnhub if you add a key, your AI provider, and this repository for update checks.
+- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), so it can talk about your money; for a TL;DR, the article's text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
+- **Network requests** go to Yahoo Finance, Google News and StockTwits for data, the publisher's page when you open a TL;DR, Finnhub if you add a key, your AI provider, and this repository for update checks.
 
 ## Where the data comes from
 
@@ -214,6 +261,8 @@ Stockit follows five shared blueprints: in-app updates, settings, AI configurati
 | A stock isn't found | Use its Yahoo Finance ticker, with the exchange suffix outside the US (`ASML.AS`, `VWCE.DE`) |
 | "Updated; couldn't load …" | That source didn't answer. Tap refresh again in a minute; the last loaded data stays on screen |
 | Company numbers are missing | Yahoo sometimes doesn't answer for these. Add a free Finnhub key in **Settings › News and signals** as a backup |
+| A TL;DR says the article couldn't be read | The publisher blocks reading from apps (paywall or cookie wall). Tap **Read the full article** to read it at the source |
+| The voice sounds robotic | Download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices, then pick it in **Settings › Listening**, or switch to **✦ AI voice** |
 | The briefing, views or Ideas are missing | They appear once an AI key is saved in **Settings › AI settings** |
 | "Key saved, but checking it failed" | The key was rejected or has no credit. Tap **Change key** and paste a valid one |
 | The CSV import finds no stocks | The file needs a symbol or ticker column. Or paste the tickers instead |

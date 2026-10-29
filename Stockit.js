@@ -9,6 +9,8 @@
  *  - Owned stocks (shares, average price) and a watchlist; add by search, pasted list, a broker CSV or a screenshot
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
+ *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Read aloud, as in BlogPulse: the briefing, stories, TL;DRs and Flash, with iPhone voices or ✦ OpenAI voices
  *  - Optional Claude or OpenAI: a portfolio briefing, a story and a buy / hold / sell view per stock, and new ideas
  *  - Home Screen widget in the shared frame (app-blueprints · widgets), in-app updates from GitHub
  *  - Opens on a 2.4 s launch screen with the Stockit logo (app-blueprints · launch-screen)
@@ -19,7 +21,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -65,11 +67,13 @@ const CONFIG = [
     { k: "newsPerStock", label: "Headlines kept per stock", unit: "headlines", def: 10, min: 3, max: 25, step: 1 },
     { k: "newsDays", label: "Headlines from the last", unit: "days", def: 7, min: 1, max: 30, step: 1 },
     { k: "newsRefreshMin", label: "Reload headlines when older than", help: "Refresh still reloads prices every time", unit: "min", def: 60, min: 15, max: 720, step: 15 },
+    { k: "flashPerStock", label: "Headlines per stock in Flash", help: "The most recent and best-known sources come first", unit: "headlines", def: 3, min: 1, max: 5, step: 1 },
   ]],
   ["AI limits", [
     { k: "briefingHours", label: "Rewrite the briefing at most every", help: "Adding or removing a stock also brings a new one", unit: "h", def: 6, min: 1, max: 48, step: 1 },
     { k: "briefingMaxStocks", label: "Stocks in the briefing", help: "Owned stocks first, biggest first, then the watchlist", unit: "stocks", def: 25, min: 5, max: 60, step: 5 },
     { k: "aiHeadlines", label: "Headlines AI reads per stock", help: "More gives richer stories but uses more tokens", unit: "headlines", def: 6, min: 2, max: 15, step: 1 },
+    { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 9000, min: 2000, max: 30000, step: 1000 },
     { k: "ideasCount", label: "Ideas per request", unit: "ideas", def: 5, min: 3, max: 10, step: 1 },
     { k: "ideaThemes", label: "Themes for ideas", help: "One per line; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
   ]],
@@ -182,6 +186,8 @@ const settings = Object.assign(
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
     ai: true, aiProvider: "anthropic",                                          // AI configuration
+    speechEngine: "device", voiceURI: "", voiceRate: 1, voicePitch: 1, voiceGender: "all",   // Listening: iPhone voice
+    ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",                    // Listening: ✦ AI voice (OpenAI)
     checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
     theme: "auto", density: "comfortable", font: "sans", textSize: 1,           // Appearance
     lastRefresh: 0 },                                                           // internal state
@@ -189,7 +195,8 @@ const settings = Object.assign(
 );
 let stocks = await load("stocks", []);            // [{ s, name, exch, list: "own" | "watch", sh, cost, added }]
 let market = await load("market", {});            // per symbol: price, prev, pts, f (fundamentals), prof, news, crowd
-let insights = await load("insights", { briefing: null, stories: {}, ideas: null });   // AI output, with provider and time
+let insights = await load("insights", { briefing: null, stories: {}, ideas: null });
+let tldrs = await load("tldrs", {});              // TL;DR per headline link, newest 150 kept   // AI output, with provider and time
 insights.stories = insights.stories || {};
 
 function saveAll() {
@@ -523,11 +530,11 @@ function removeKey(p) {
 let usage = await load("usage", { since: Date.now(), p: {} });
 const dayKey = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-function recordUsage(provider, model, feature, tin, tout) {
+function recordUsage(provider, model, feature, tin, tout, chars = 0) {   // chars: text sent for speech
   const P = usage.p[provider] = usage.p[provider] || { calls: 0, in: 0, out: 0, models: {}, features: {}, days: {} };
   const b = (o, k) => o[k] = o[k] || { calls: 0, in: 0, out: 0 };
   for (const x of [P, b(P.models, model), b(P.features, feature), b(P.days, dayKey())]) {
-    x.calls++; x.in += tin; x.out += tout;
+    x.calls++; x.in += tin; x.out += tout; if (chars) x.chars = (x.chars || 0) + chars;
   }
   const days = Object.keys(P.days).sort();
   while (days.length > 400) delete P.days[days.shift()];   // keep about 13 months of days
@@ -548,6 +555,8 @@ async function fetchModels(p) {
     t: m.created_at ? Date.parse(m.created_at) : (m.created || 0) * 1000,
   }));
   // OpenAI lists every model the key can reach; keep only the ones that write text.
+  if (p === "openai")   // speech models get their own list, for Settings › Listening
+    settings.ttsModels = { at: Date.now(), list: list.filter(m => /tts/.test(m.id)).sort((a, b) => b.t - a.t).map(m => ({ id: m.id, name: m.id })) };
   if (p === "openai") list = list.filter(m => /^(gpt-|o\d|chatgpt-)/.test(m.id)
     && !/(audio|realtime|tts|transcribe|image|search|embedding|instruct|moderation)/.test(m.id));
   list.sort((a, b) => b.t - a.t);
@@ -792,6 +801,105 @@ function reportAdd(r) {
   if (r.added.length && settings.ai && aiKey()) runBriefing(false);
 }
 
+// ---------- Flash: a TL;DR of one headline ----------
+// The article is read here (Google News links are followed to the publisher when the page names it); paywalls, consent
+// pages and apps that need JavaScript leave only the headline and summary, and the TL;DR says so.
+const plain = s => decode(String(s || "").replace(/<(script|style)[\s\S]*?<\/\1>/gi, " "));
+function extractArticle(html) {
+  const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); const c = m && m[0].match(/content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i); return c ? plain(c[1] || c[2]) : ""; };
+  const desc = meta("og:description") || meta("description");
+  let h = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|figure|button)\b[\s\S]*?<\/\1>/gi, " ");
+  const main = h.match(/<article[\s>][\s\S]*<\/article>/i) || h.match(/<main[\s>][\s\S]*<\/main>/i);
+  if (main) h = main[0];
+  const paras = (h.match(/<p\b[^>]*>[\s\S]*?<\/p>/gi) || []).map(plain).filter(t => t.length >= 60);
+  const text = paras.join("\n\n");
+  return { desc, paras, text, words: text ? text.split(/\s+/).length : 0 };
+}
+async function articleHTML(url) {
+  const get = async u => {
+    const r = new Request(u);
+    r.timeoutInterval = cfg("fetchTimeout");
+    r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5" };
+    const html = await r.loadString();
+    return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
+  };
+  let r = await get(url);
+  if (/news\.google\.com/i.test(r.url)) {   // a Google News page: follow it to the publisher if it names the article
+    const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
+    r = m ? await get(m[1].replace(/&amp;/g, "&")) : { html: "", url };
+  }
+  if (r.code >= 400 || /(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) r.html = "";
+  return r;
+}
+function extractiveTldr(title, art, text) {
+  if (!art || !art.paras.length) return { lead: text || title, points: [] };
+  const tk = s => [...new Set(String(s).toLowerCase().match(/[a-z0-9][a-z0-9'-]{3,}/g) || [])];
+  const sents = [];
+  art.paras.slice(0, 40).forEach((p, pi) => (p.match(/[^.!?]+[.!?]+["”’)]?(\s|$)/g) || [p]).forEach(x => {
+    x = x.trim(); if (x.length >= 50 && x.length <= 300) sents.push({ s: x, pi });
+  }));
+  const freq = {};
+  sents.forEach(x => tk(x.s).forEach(t => freq[t] = (freq[t] || 0) + 1));
+  const inTitle = new Set(tk(title));
+  sents.forEach((x, i) => { const ts = tk(x.s); x.i = i; x.score = ts.reduce((n, t) => n + Math.min(freq[t], 6) + (inTitle.has(t) ? 3 : 0), 0) / Math.sqrt(ts.length || 1) + (x.pi < 2 ? 2 : 0); });
+  const lead = art.desc && art.desc.length > 40 ? art.desc : (sents[0] ? sents[0].s : title);
+  const points = sents.filter(x => x.s !== lead && !lead.includes(x.s.slice(0, 40)))
+    .sort((a, b) => b.score - a.score).slice(0, 4).sort((a, b) => a.i - b.i).map(x => x.s);
+  return { lead, points };
+}
+async function makeNewsTldr(sym, n) {
+  const m = market[sym] || {}, x = stocks.find(y => y.s === sym) || {};
+  let art = null, url = n.l;
+  try { const r = await articleHTML(n.l); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { console.log("Article " + n.l + ": " + e); }
+  const usable = !!(art && art.words > 80);
+  const text = usable ? art.text : (art && art.desc) || "";
+  const base = { at: Date.now(), mins: usable ? Math.max(1, Math.round(art.words / 230)) : 0, partial: !usable, url: /^https:\/\//i.test(url) ? url : n.l };
+  let note = "";
+  if (aiKey()) {
+    try {
+      const name = cleanName(m.name) || x.name || sym, dp = dayPct(m);
+      const system = `You write TL;DRs of financial news for a casual long-term investor who owns or watches ${name} (${sym}). Plain words, short sentences, explain any jargon in passing.
+Use only facts in what you're given. If the article text is missing, explain only what the headline and summary say and make clear the full article wasn't available. Never invent figures, quotes or events. Don't tell the reader to buy or sell.
+Reply with ONLY JSON, no code fences: {"tldr":"one sentence","points":["3 to 5 short bullets with the concrete facts"],"why":"one or two sentences on what this could mean for ${sym}"}`;
+      const user = `Headline: ${n.t}\nPublisher: ${n.p}\nPublished: ${new Date(n.at || Date.now()).toISOString().slice(0, 10)}\n${dp != null ? `${sym} moved ${dp.toFixed(2)}% today.\n` : ""}\n` +
+        (usable ? "Article text:\n" + text.slice(0, cfg("tldrChars")) : text ? "Only the article's summary is available:\n" + text : "The article text is not available.");
+      const j = parseJSON(await aiCall(system, user, 900, "tldr"));
+      return Object.assign(base, { kind: "ai", by: settings.aiProvider, lead: String(j.tldr || n.t).slice(0, 600),
+        points: (Array.isArray(j.points) ? j.points : []).map(String).slice(0, 6), why: String(j.why || "").slice(0, 600) });
+    } catch (e) { note = "The AI summary failed (" + String(e.message || e).slice(0, 60) + "), so this was taken from the article instead."; }
+  }
+  if (!usable && !text) throw new Error("This article couldn't be read here. Open it at the source to read it");
+  return Object.assign(base, { kind: "extract", note }, extractiveTldr(n.t, usable ? art : null, text));
+}
+function pruneTldrs() { Object.keys(tldrs).sort((a, b) => tldrs[b].at - tldrs[a].at).slice(150).forEach(k => delete tldrs[k]); }
+
+// ---------- read aloud: ✦ AI voice from OpenAI's speech endpoint (Claude's API has no speech output) ----------
+const TTS_LEGACY_VOICES = ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"];   // all tts-1 and tts-1-hd can use
+async function aiSpeech(text) {
+  const key = keyFor("openai");
+  if (!key) throw new Error("AI voices need an OpenAI key");
+  const model = settings.ttsModel || "gpt-4o-mini-tts", legacy = /^tts-1/.test(model);
+  let voice = settings.ttsVoice || "coral";
+  if (legacy && !TTS_LEGACY_VOICES.includes(voice)) voice = "coral";
+  const body = { model, voice, input: String(text).slice(0, 4096), response_format: "mp3" };
+  if (!legacy && settings.ttsInstructions) body.instructions = String(settings.ttsInstructions).slice(0, 500);
+  const speed = Number(settings.voiceRate) || 1;
+  if (speed !== 1) body.speed = speed;
+  const r = new Request("https://api.openai.com/v1/audio/speech");
+  r.method = "POST"; r.timeoutInterval = 60;
+  r.headers = { "Authorization": "Bearer " + key, "Content-Type": "application/json" };
+  r.body = JSON.stringify(body);
+  const data = await r.load();
+  const code = r.response && r.response.statusCode;
+  if (code !== 200) {
+    let msg = `HTTP ${code}`;
+    try { msg = JSON.parse(data.toRawString()).error.message || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  recordUsage("openai", model, "speech", 0, 0, body.input.length);
+  return data.toBase64String();
+}
+
 // ---------- in-app updates (app-blueprints · in-app-updates) ----------
 // Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
 function cmpVer(a, b) {
@@ -868,6 +976,7 @@ const offerUpdate = () => { if (pendingUpdate) call("__showUpdate", pendingUpdat
 
 // ---------- state sent to the UI ----------
 // The signal shown for a stock: the newer of its own story and the portfolio briefing.
+const tldrId = l => { let h = 5381; const s = String(l); for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
 function sigFor(sym) {
   const st = insights.stories[sym], b = insights.briefing, bs = b && b.stocks && b.stocks[sym];
   if (st && (!bs || st.at >= b.at)) return { signal: st.signal, confidence: st.confidence, line: st.reasons && st.reasons[0] || "", by: st.by, at: st.at };
@@ -905,7 +1014,11 @@ function clientState() {
       widgetMoney: !!settings.widgetMoney, newsYahoo: settings.newsYahoo !== false, newsWeb: settings.newsWeb !== false, crowd: settings.crowd !== false,
       style: settings.style, ai: settings.ai, aiProvider: settings.aiProvider, hasKey: !!aiKey(), checkUpdates: settings.checkUpdates !== false,
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
+      speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
+      voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
     },
+    ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO, appName: APP,
   };
@@ -973,7 +1086,8 @@ async function handle(m) {
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
-      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates"].includes(m.k)) settings[m.k] = m.v;
+      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates",
+        "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       write("settings", settings);
       if (m.k === "widgetMoney") saveWidget(widgetSnapshot());
       return;
@@ -1041,6 +1155,19 @@ async function handle(m) {
       return reportAdd(await addStocks([{ s: it.s, name: it.name }], "watch"));
     }
     case "share": if (m.text) await ShareSheet.present([String(m.text).slice(0, 20000)]); return;
+    case "tldr": {   // Flash and stock pages: a TL;DR of one headline, cached per link
+      const n = ((market[m.s] || {}).news || []).find(h => h.l === m.l);
+      if (!n) return call("onTldr", m.id, { error: "This headline is no longer in the list. Refresh and try again" });
+      const id = tldrId(n.l);
+      if (tldrs[id] && !m.force) return call("onTldr", m.id, tldrs[id]);
+      try { tldrs[id] = await makeNewsTldr(m.s, n); pruneTldrs(); write("tldrs", tldrs); }
+      catch (e) { return call("onTldr", m.id, { error: String(e.message || e) }); }
+      return call("onTldr", m.id, tldrs[id]);
+    }
+    case "ttsaudio":   // one piece of ✦ AI speech, returned to the page as base64 MP3
+      try { return call("__done", m.req, true, await aiSpeech(m.text)); }
+      catch (e) { return call("__done", m.req, false, String(e.message || e)); }
+    case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
     case "openlink": if (/^https:\/\//i.test(String(m.v || ""))) await Safari.openInApp(m.v, false); return;
     case "openurl":   // Settings › Built with: only the blueprints repository opens from here
       if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
@@ -1095,12 +1222,13 @@ function clientApp() {
   const look = { theme: S.settings.theme || "auto", density: S.settings.density || "comfortable", font: S.settings.font || "sans", textSize: +S.settings.textSize || 1 };
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
+  let newsOpen = null; const tl = {};   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
   const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
@@ -1153,6 +1281,7 @@ function clientApp() {
     S = st; syncBusy(); aiLoading.clear();
     if (tab === "ideas" && !S.settings.hasKey) tab = "own";
     if (openSym && !S.stocks.some(x => x.s === openSym)) openSym = null;
+    if (newsOpen && !S.stocks.some(x => x.s === newsOpen.s)) newsOpen = null;
     renderAll();
   };
   window.onProgress = (d, t) => { progress = t ? [d, t] : null; renderStatus(); };
@@ -1265,13 +1394,13 @@ function clientApp() {
   }
   function renderTabs() {
     const own = S.stocks.filter(x => x.list === "own").length, watch = S.stocks.length - own;
-    const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch]].concat(S.settings.hasKey ? [["ideas", "✦ Ideas", null]] : []);
+    const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null]].concat(S.settings.hasKey ? [["ideas", "✦ Ideas", null]] : []);
     $("#tabs").innerHTML = t.map(([k, l, n]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
-  function renderAll() { render(); renderDetail(); renderAdd(); renderAI(); renderCfg(); }
+  function renderAll() { render(); renderDetail(); renderNews(); renderAdd(); renderAI(); renderCfg(); }
   function render() {
     applyLook(); renderStatus(); renderTabs();
-    $("#main").innerHTML = tab === "ideas" ? ideasHTML() : listHTML();
+    $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : listHTML();
   }
 
   // ---- portfolio and watchlist ----
@@ -1354,8 +1483,8 @@ function clientApp() {
       ${ps.length > 1 ? `<button class="link small" data-act="brieffull">${briefFull ? "Show less" : "Read the full briefing"}</button>` : ""}
       ${briefFull && (b.watch || []).length ? `<h3 class="mini">Keep an eye on</h3><ul class="dots">${b.watch.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
       <div class="sigcount">${["buy", "hold", "sell"].filter(k => n[k]).map(k => `<span class="chip sig-${k}">${n[k]} ${k}</span>`).join("")}</div>
-      <div class="aic-btns"><span class="note grow">${b.stale ? "Your stocks changed since this was written. " : ""}Opinions from the news and numbers, not financial advice.</span>
-        <button class="sm" data-act="share-brief">Share</button><button class="sm" data-act="briefing" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div>
+      <p class="note">${b.stale ? "Your stocks changed since this was written. " : ""}Opinions from the news and numbers, not financial advice.</p>
+      <div class="aic-btns"><button class="sm" data-act="listenbrief">${SPK}Listen</button><button class="sm" data-act="share-brief">Share</button><button class="sm" data-act="briefing" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div>
     </section>`;
   }
 
@@ -1444,7 +1573,8 @@ function clientApp() {
     return `<section class="story"><h3 class="sec">The story</h3><span class="badge-ai">✦ AI story by ${PN[st.by] || esc(st.by)}</span>
       <h2 class="story-t">${esc(st.headline)}</h2>${paras(st.story, st.news).join("")}
       ${list("Why " + st.signal, st.reasons)}${list("What could go wrong", st.risks)}${list("What to watch", st.watch)}
-      <div class="aic-btns"><span class="note grow">Written ${rel(st.at)}. Not financial advice.</span><button class="sm" data-act="share-story" data-v="${esc(x.s)}">Share</button>
+      <p class="note">Written ${rel(st.at)}. Not financial advice.</p>
+      <div class="aic-btns"><button class="sm" data-act="listenstory" data-v="${esc(x.s)}">${SPK}Listen</button><button class="sm" data-act="share-story" data-v="${esc(x.s)}">Share</button>
         <button class="sm" data-act="story" data-v="${esc(x.s)}" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div></section>`;
   }
   function numbersHTML(x) {
@@ -1478,7 +1608,7 @@ function clientApp() {
   }
   function newsHTML(x) {
     const n = x.news || [];
-    return `<section><h3 class="sec">Headlines</h3>${n.length ? n.map(h => `<button class="news" data-act="openlink" data-v="${esc(h.l)}">
+    return `<section><h3 class="sec">Headlines</h3>${n.length ? n.map(h => `<button class="news" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}">
       <b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}${h.src === "web" ? " · web" : ""}</small></button>`).join("")
       : `<p class="muted">${x.newsAt ? "No headlines in the last few days." : "Headlines load in a moment…"}</p>`}</section>`;
   }
@@ -1564,6 +1694,7 @@ function clientApp() {
         ? `${PN[A.provider]} — ${esc(A.model[A.provider])}${Pu ? " — " + fmtN(Pu.in + Pu.out) + " tokens used" : ""}`
         : "Add a Claude or OpenAI key for the briefing, stories, signals and ideas"}</small></div>
         <button class="sm ${S.settings.hasKey ? "" : "primary"}" data-act="aiopen">AI settings</button></div>
+      <h3 class="sec">Listening</h3>${listenHTML()}
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have Stockit ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
@@ -1586,7 +1717,7 @@ function clientApp() {
     const max = Math.max(1, ...days.map(tot)), month = S.ai.today.slice(0, 7);
     const monthTot = Object.entries(P.days).filter(([k]) => k.startsWith(month)).reduce((n, [, x]) => n + x.in + x.out, 0);
     const rows = (obj, label) => Object.entries(obj).sort((x, y) => (y[1].in + y[1].out) - (x[1].in + x[1].out))
-      .map(([k, x]) => `<tr><td>${esc(label(k))}</td><td>${x.calls}</td><td>${fmtN(x.in)}</td><td>${fmtN(x.out)}</td></tr>`).join("");
+      .map(([k, x]) => `<tr><td>${esc(label(k))}</td><td>${x.calls}</td>${x.chars && !x.in ? `<td>${fmtN(x.chars)} chars</td><td>—</td>` : `<td>${fmtN(x.in)}</td><td>${fmtN(x.out)}</td>`}</tr>`).join("");
     return `<div class="ucard"><div class="aic-h"><b>${PN[p]}</b><span class="muted small">${P.calls} request${P.calls === 1 ? "" : "s"}</span></div>
       <div class="ustat"><div><b>${fmtN(P.in + P.out)}</b><small>total tokens</small></div><div><b>${fmtN(P.in)}</b><small>input</small></div><div><b>${fmtN(P.out)}</b><small>output</small></div></div>
       <p class="note">Today ${fmtN(tot(S.ai.today))} tokens — this month ${fmtN(monthTot)} tokens</p>
@@ -1629,7 +1760,275 @@ function clientApp() {
     </div>`;
     el.scrollTop = keep;   // re-renders must not jump the user back to the top
   }
-  function lockBody() { document.body.classList.toggle("locked", !!(openSym || addOpen || cfgOpen || aiOpen)); }
+
+  // ---- Flash: each stock's top headlines, a TL;DR per headline, and reading aloud ----
+  const MAJOR = /reuters|bloomberg|financial times|wall street journal|\bwsj\b|cnbc|barron|marketwatch|economist|associated press|yahoo finance|investor's business|morningstar|nikkei|forbes|fortune/i;
+  function topNews(x) {
+    const now = Date.now(), tick = x.s.split(/[.=^-]/)[0].replace(/[^A-Za-z0-9]/g, ""), first = String(x.name || "").split(/[\s,.]/)[0].toLowerCase();
+    const about = h => (tick && new RegExp("\\b" + tick + "\\b", "i").test(h.t)) || (first.length > 2 && h.t.toLowerCase().includes(first));
+    const score = h => Math.exp(-(now - h.at) / 864e5 / 1.5) + (MAJOR.test(h.p) ? 0.5 : 0) + (about(h) ? 0.4 : 0);
+    return (x.news || []).map(h => [h, score(h)]).sort((a, b) => b[1] - a[1]).slice(0, S.cfg.flashPerStock || 3).map(a => a[0]);
+  }
+  const flashOrder = () => S.stocks.slice().sort((a, b) => (a.list === "own" ? 0 : 1) - (b.list === "own" ? 0 : 1)
+    || ((b.sh || 0) * (b.price || 0)) - ((a.sh || 0) * (a.price || 0)) || a.s.localeCompare(b.s));
+  function flashHTML() {
+    if (!S.stocks.length) return `<section class="empty"><h2>No stocks yet</h2><p>Add a stock and its top headlines appear here, each with a TL;DR.</p><button class="primary" data-act="addopen">Add stocks</button></section>`;
+    const n = S.cfg.flashPerStock || 3;
+    return `<div class="listbar"><span>Top ${n} headline${n === 1 ? "" : "s"} for each stock</span><button class="sm" data-act="listenflash">${SPK}Listen</button></div>
+      <div class="flash">${flashOrder().map(x => {
+        const d = dayPct(x), top = topNews(x);
+        return `<article class="fl" id="c-fl-${esc(x.s)}"><button class="fl-s" data-act="open" data-v="${esc(x.s)}" aria-label="Open ${esc(x.s)}">
+          <b>${esc(x.s)}</b><small>${esc(String(x.name || "").replace(/,? (Inc\.?|Corporation|Corp\.?|N\.V\.|plc|Ltd\.?|Holdings?|Company)$/i, ""))}</small>
+          <span class="pill ${cls(d)}">${pct(d)}</span>${x.list === "own" ? "" : `<span class="fl-w">Watching</span>`}</button>
+          <div class="fl-n">${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
+            : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}</div></article>`;
+      }).join("")}</div>
+      <p class="note pad">Tap a headline for its TL;DR. Headlines from Yahoo Finance${S.settings.newsWeb ? " and the web" : ""}; summaries can miss details. Not financial advice.</p>`;
+  }
+  const newsOf = (s, l) => { const x = byS(s); return x && (x.news || []).find(h => h.l === l); };
+  function openNews(s, l) {
+    newsOpen = { s, l };
+    if (!tl[l] || tl[l].error) { tl[l] = "loading"; send("tldr", { s, l, id: l }); }
+    renderNews(); $("#newssheet").scrollTop = 0;
+  }
+  window.onTldr = (id, d) => { tl[id] = d; if (newsOpen && newsOpen.l === id) renderNews(); };
+  function renderNews() {
+    const el = $("#newssheet"), keep = el.scrollTop;
+    const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l);
+    if (newsOpen && !h) newsOpen = null;
+    el.classList.toggle("open", !!h); lockBody();
+    if (!h) return;
+    const d = tl[h.l], dp = dayPct(x);
+    let body;
+    if (!d || d === "loading") body = `<div class="tli-load" role="status"><span class="busy-dot"></span>${S.settings.hasKey ? "Reading and summarising the article…" : "Reading the article…"}</div>`;
+    else if (d.error) body = `<p class="err">${esc(d.error)}.</p><div class="aic-btns"><button class="sm" data-act="tldrretry">Try again</button></div>`;
+    else body = `<div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${PN[d.by] || esc(d.by)}</span>` : `<span class="badge-ex">From the article — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
+      ${d.partial ? `<p class="note">The full article couldn't be read here, so this ${d.kind === "ai" ? "explains the headline and summary" : "is the article's own summary"}.</p>` : ""}${d.note ? `<p class="note">${esc(d.note)}</p>` : ""}
+      <p class="tl-lead">${esc(d.lead)}</p>
+      ${(d.points || []).length ? `<ul class="tl-pts">${d.points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
+      ${d.why ? `<div class="tl-why"><b>What it could mean for ${esc(x.s)}</b><p>${esc(d.why)}</p></div>` : ""}
+      <div class="tl-listen"><button class="listen" data-act="listentldr">${SPK}Listen</button>${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry">✦ Summarise with AI</button>` : ""}</div>`;
+    const more = (x.news || []).filter(n => n.l !== h.l).slice(0, 6);
+    el.innerHTML = `<div class="sh-head"><h2>${esc(x.s)} <span class="pill ${cls(dp)}">${pct(dp)}</span></h2><button class="link" data-act="newsclose">Done</button></div><div class="sh-body tl">
+      <p class="kicker">${esc(h.p)} · ${rel(h.at)}${h.src === "web" ? " · from the web" : ""}</p>
+      <h2 class="tl-h">${esc(h.t)}</h2>
+      <h3 class="mini">TL;DR</h3>
+      ${body}
+      <button class="primary block" data-act="openlink" data-v="${esc((d && d.url) || h.l)}">Read the full article at ${esc(h.p)}</button>
+      <p class="note">Summaries can miss details, and nothing here is financial advice.</p>
+      ${more.length ? `<h3 class="sec">More about ${esc(x.s)}</h3>${more.map(n => `<button class="news" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(n.l)}"><b>${esc(n.t)}</b><small>${esc(n.p)} · ${rel(n.at)}</small></button>`).join("")}` : ""}
+    </div>`;
+    el.scrollTop = keep;
+  }
+  const sentence = t => { t = clean(t); return t && !/[.!?]$/.test(t) ? t + "." : t; };
+  function tldrItems(x, h, d) {
+    return [{ title: h.t, text: [h.t, "From " + h.p, d.lead].concat(d.points || []).concat(d.why ? ["What it could mean for " + (x.name || x.s) + ": " + d.why] : []).map(sentence).join(" ") }];
+  }
+  function briefItems(b) {
+    return [{ title: b.headline, text: sentence(b.headline) + " " + b.story }].concat((b.watch || []).length ? [{ title: "Keep an eye on", text: "Keep an eye on: " + b.watch.map(sentence).join(" ") }] : []);
+  }
+  function storyItems(x, st) {
+    const list = (t, a) => a && a.length ? [{ title: t, text: t + ". " + a.map(sentence).join(" ") }] : [];
+    return [{ title: st.headline, text: sentence(st.headline) + " " + st.story }]
+      .concat(list("Why " + st.signal, st.reasons), list("What could go wrong", st.risks), list("What to watch", st.watch));
+  }
+  function flashItems() {
+    return flashOrder().map(x => ({ id: "fl-" + x.s, title: x.s, text: topNews(x).length
+      ? `${x.name || x.s}. ` + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ")
+      : "" })).filter(it => it.text);
+  }
+
+  // ---- read aloud (as in BlogPulse): iPhone voices through the Web Speech API, or ✦ AI voices from OpenAI ----
+  // ── Read aloud: system voices through the Web Speech API ──
+  const SYN = window.speechSynthesis;
+  const SPK = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
+  const GENDER = {};
+  ("Samantha Karen Moira Tessa Fiona Veena Victoria Allison Ava Susan Zoe Nicky Kate Serena Martha Catherine Isha Agnes Kathy Princess Vicki Joelle Flo Sandy Shelley Grandma " +
+   "Amélie Audrey Aurélie Marie Anna Petra Helena Alice Federica Paulina Mónica Monica Marisol Luciana Joana Milena Katya Yuna Kyoko Ting-Ting Tingting Sin-ji Mei-Jia Meijia " +
+   "Lekha Sara Nora Ellen Laura Zuzana Ioana Mariska Melina Yelda Damayanti Kanya Lesya Carmit Laila Amira Tünde Linh Montse Ewa Zosia Iveta Lana Satu Klara Alva Kristina Ellen Soumya Vani")
+    .split(" ").forEach(n => GENDER[n] = "f");
+  ("Daniel Alex Fred Aaron Arthur Rishi Oliver Tom Gordon Lee Evan Nathan Rocko Eddy Reed Ralph Grandpa Thomas Jacques Markus Yannick Luca Diego Jorge Juan Carlos Felipe Xander " +
+   "Maged Majed Tarik Otoya Hattori Li-mu Yu-shu Aman Neel Dariush Rodrigo Martin Henrik Magnus Oskar Viktor Tünde")
+    .split(" ").forEach(n => GENDER[n] = GENDER[n] || "m");
+  const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Organ|Pipe Organ|Superstar|Trinoids|Whisper|Wobble|Zarvox|Deranged|Hysterical)\b/i;
+  const baseName = v => v.name.replace(/\s*\((Enhanced|Premium|Compact)\)/i, "").replace(/\s*\(.*\)\s*$/, "").trim();
+  const quality = v => /premium/i.test(v.name + v.voiceURI) ? "Premium" : /enhanced/i.test(v.name + v.voiceURI) ? "Enhanced" : "";
+  const genderOf = v => GENDER[baseName(v)] || "";
+  let voices = [];
+  function loadVoices() { voices = SYN ? SYN.getVoices().filter(v => !NOVELTY.test(v.name)) : []; if (cfgOpen) renderCfg(); }
+  if (SYN) { loadVoices(); SYN.addEventListener ? SYN.addEventListener("voiceschanged", loadVoices) : (SYN.onvoiceschanged = loadVoices); }
+  function currentVoice() {
+    if (!voices.length) return null;
+    const saved = voices.find(v => v.voiceURI === S.settings.voiceURI);
+    if (saved) return saved;
+    const en = voices.filter(v => /^en(-|_|$)/i.test(v.lang));   // headlines are mostly English
+    const rank = v => (quality(v) === "Premium" ? 3 : quality(v) === "Enhanced" ? 2 : 0) + (v.default ? 1 : 0) + (/en-(US|GB)/i.test(v.lang) ? 0.5 : 0);
+    return (en.length ? en : voices).slice().sort((x, y) => rank(y) - rank(x))[0];
+  }
+  const langName = code => { try { return new Intl.DisplayNames([navigator.language || "en"], { type: "language" }).of(code) || code; } catch (e) { return code; } };
+  const clean = t => String(t || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "").replace(/\*\*|__/g, "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  function chunks(t) {   // short pieces: long utterances can stop early in WebKit
+    const out = [];
+    for (let sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
+      sen = sen.trim(); if (!sen) continue;
+      while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; out.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
+      if (out.length && out[out.length - 1].length + sen.length < 160) out[out.length - 1] += " " + sen; else out.push(sen);
+    }
+    return out;
+  }
+  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false };
+  // AI voice: OpenAI speech, played through one <audio> element that a tap unlocks first
+  const OAI_VOICES = [["alloy", "n"], ["ash", "m"], ["ballad", "m"], ["coral", "f"], ["echo", "m"], ["fable", "m"], ["nova", "f"], ["onyx", "m"], ["sage", "f"], ["shimmer", "f"], ["verse", "m"], ["marin", "f"], ["cedar", "m"]];
+  const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
+  const aiTTS = () => S.settings.speechEngine === "ai" && S.settings.hasOpenAI;
+  const au = new Audio(); au.preload = "auto"; au.setAttribute("playsinline", "");
+  const SILENT = (() => {   // 0.1 s of silence as a WAV, to unlock audio inside the tap
+    const n = 800, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
+    const w = (o, t) => { for (let i = 0; i < t.length; i++) buf[o + i] = t.charCodeAt(i); };
+    w(0, "RIFF"); dv.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, "data"); dv.setUint32(40, n, true); buf.fill(128, 44);
+    let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
+  })();
+  function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
+  function aiChunks(t) {   // split at sentences: a short first piece so audio starts quickly, then up to ~2,000 characters
+    const out = []; let cur = "";
+    for (const sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
+      if (cur && (cur + sen).length > (out.length ? 2000 : 700)) { out.push(cur.trim()); cur = ""; }
+      cur += sen;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  }
+  function aiFetch(part) {
+    if (part.audio) return Promise.resolve(part.audio);
+    if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
+    return part.pending;
+  }
+  function aiPlayPart() {
+    const my = ++tts.token, part = tts.parts[tts.i];
+    if (!part) return stopSpeaking();
+    tts.loading = !part.audio; renderPlayer();
+    aiFetch(part).then(b64 => {
+      if (my !== tts.token) return;
+      tts.loading = false;
+      au.onended = () => { if (my !== tts.token) return; part.audio = null; tts.i++; aiPlayPart(); };
+      au.src = "data:audio/mpeg;base64," + b64;
+      if (!tts.paused) {
+        const pr = au.play();
+        if (pr && pr.catch) pr.catch(() => { if (my === tts.token) { tts.paused = true; renderPlayer(); window.toast("Tap play to start the AI voice"); } });
+      }
+      renderPlayer();
+      const nx = tts.parts[tts.i + 1]; if (nx) aiFetch(nx).catch(() => {});   // the next piece is ready before this one ends
+    }).catch(err => {
+      if (my !== tts.token) return;
+      const rest = tts.items.slice(part.k), label = tts.label;
+      window.toast(`AI voice failed: ${String(err || "").slice(0, 70)}. Using the iPhone voice.`);
+      if (SYN && voices.length) speak(label, rest, "device"); else stopSpeaking();
+    });
+  }
+  const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
+  function speak(label, items, engine) {
+    const ai = engine ? engine === "ai" : aiTTS();
+    if (!ai && (!SYN || !voices.length)) {   // no Web Speech: hand the text to Scriptable's system voice
+      send("speak", { text: items.map(x => clean(x.text)).join(" ") });
+      return window.toast("Reading aloud with the system voice");
+    }
+    stopSpeaking(true);
+    if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
+    tts.engine = ai ? "ai" : "device";
+    tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
+    tts.parts = [];
+    items.forEach((it, k) => (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })));
+    if (!tts.parts.length) return stopSpeaking();
+    playSoon();
+  }
+  function playPart() {
+    if (tts.engine === "ai") return aiPlayPart();
+    const my = ++tts.token, part = tts.parts[tts.i];
+    if (!part) return stopSpeaking();
+    const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
+    if (v) { u.voice = v; u.lang = v.lang; }
+    u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
+    const next = () => { if (my !== tts.token) return; tts.i++; playPart(); };
+    u.onend = next; u.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
+    SYN.speak(u); renderPlayer();
+  }
+  function stopSpeaking(quiet) {
+    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
+    au.onended = null; try { au.pause(); } catch (e) {}
+    if (SYN) SYN.cancel();
+    if (!quiet) renderPlayer();
+  }
+  function togglePause() {
+    if (!tts.on) return;
+    if (tts.engine === "ai") {
+      if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
+      else { tts.paused = true; au.pause(); }
+    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    renderPlayer();
+  }
+  function skipItem() {
+    if (!tts.on) return;
+    const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
+    if (j < 0) return stopSpeaking();
+    tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
+    tts.i = j; tts.paused = false; playSoon();
+  }
+  function renderPlayer() {
+    const pl = $("#player"), on = tts.on;
+    pl.hidden = !on; document.body.classList.toggle("playing", on);
+    document.querySelectorAll(".speaking").forEach(el => el.classList.remove("speaking"));
+    if (!on) return;
+    const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
+    $("#plTitle").textContent = it.title || tts.label;
+    $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
+      + (tts.loading ? " — preparing…" : tts.paused ? " — paused" : "");
+    pl.classList.toggle("paused", tts.paused);
+    $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
+    $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
+    if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
+  }
+  const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
+  const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
+  function listenHTML() {
+    const eng = S.settings.speechEngine === "ai" ? "ai" : "device";
+    return `<div class="lk-row"><span class="lk-l">Voice engine</span>${vseg("speechEngine", [["device", "iPhone voice"], ["ai", "✦ AI voice"]])}</div>` + (eng === "ai" ? aiListenHTML() : deviceListenHTML());
+  }
+  function aiListenHTML() {
+    if (!S.settings.hasOpenAI) return `<p class="note">AI voices come from OpenAI, so they need an OpenAI key, even when Claude writes your briefing (Claude's API doesn't offer speech).</p>
+      <div class="aic-btns"><button class="sm primary" data-act="aiopen">Add an OpenAI key</button></div>`;
+    const model = S.settings.ttsModel || "gpt-4o-mini-tts", legacy = /^tts-1/.test(model), g = S.settings.voiceGender || "all";
+    const vs = OAI_VOICES.filter(([v, gg]) => (!legacy || LEGACY_TTS.has(v)) && (g === "all" || gg === g || v === S.settings.ttsVoice));
+    const loaded = ((S.ttsModels || {}).list || []).map(m => m.id);
+    const mlist = [model].concat(loaded.length ? loaded : ["gpt-4o-mini-tts", "tts-1-hd", "tts-1"]).filter((x, i, a) => a.indexOf(x) === i);
+    const gl = { f: " (female)", m: " (male)", n: " (neutral)" };
+    return `<div class="lk-row"><span class="lk-l">Voice</span>${vseg("voiceGender", [["all", "All"], ["f", "Female"], ["m", "Male"]])}
+        <select class="ttsvoicesel voicesel" aria-label="AI voice">${vs.map(([v, gg]) => `<option value="${v}" ${v === S.settings.ttsVoice ? "selected" : ""}>${v[0].toUpperCase() + v.slice(1)}${gl[gg]}</option>`).join("")}</select></div>
+      <div class="lk-row"><span class="lk-l">Speech model</span><select class="ttsmodelsel voicesel" aria-label="Speech model">${mlist.map(m => `<option value="${esc(m)}" ${m === model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select></div>
+      ${legacy ? "" : `<div class="lk-row"><span class="lk-l">How it should sound</span><textarea class="ttsinstr cfgin wide" rows="2" placeholder="e.g. Calm, clear newsreader. Neutral accent.">${esc(S.settings.ttsInstructions || "")}</textarea></div>`}
+      <div class="lk-row"><span class="lk-l">Speed</span>${vseg("voiceRate", [[0.85, "Slow"], [1, "Normal"], [1.15, "Fast"], [1.3, "Faster"]])}</div>
+      <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button></div>
+      <p class="note">✦ Spoken by OpenAI with your key, one piece at a time; the first piece takes a few seconds. OpenAI bills each use; Stockit counts the characters under AI settings › Token usage as “Read aloud”. Voice labels describe how each voice usually sounds.${loaded.length ? "" : " Load your OpenAI models in AI settings to see every speech model your key can use."}</p>`;
+  }
+  function deviceListenHTML() {
+    if (!SYN || !voices.length) return `<p class="note">This device reads aloud with the system voice. Choose it in iOS Settings › Accessibility › Spoken Content.</p>`;
+    const g = S.settings.voiceGender || "all", cur = currentVoice();
+    const shown = voices.filter(v => g === "all" || genderOf(v) === g || v === cur);
+    const langs = {};
+    shown.forEach(v => (langs[v.lang] = langs[v.lang] || []).push(v));
+    const mine = (navigator.languages || [navigator.language || "en"]).map(l => l.toLowerCase().split("-")[0]);
+    const rankLang = l => { const b = l.toLowerCase().split(/[-_]/)[0]; const i = mine.indexOf(b); return i >= 0 ? i : b === "en" ? 50 : 100; };
+    const order = Object.keys(langs).sort((x, y) => rankLang(x) - rankLang(y) || langName(x).localeCompare(langName(y)));
+    const label = v => `${baseName(v)}${quality(v) ? " — " + quality(v) : ""}${genderOf(v) ? (genderOf(v) === "f" ? " (female)" : " (male)") : ""}`;
+    const seg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
+    return `<div class="lk-row"><span class="lk-l">Voice</span>${seg("voiceGender", [["all", "All"], ["f", "Female"], ["m", "Male"]])}
+      <select class="voicesel" aria-label="Voice">${order.map(l => `<optgroup label="${esc(langName(l))} (${esc(l)})">${langs[l].map(v => `<option value="${esc(v.voiceURI)}" ${cur && v.voiceURI === cur.voiceURI ? "selected" : ""}>${esc(label(v))}</option>`).join("")}</optgroup>`).join("")}</select></div>
+      <div class="lk-row"><span class="lk-l">Speed</span>${seg("voiceRate", [[0.85, "Slow"], [1, "Normal"], [1.15, "Fast"], [1.3, "Faster"]])}</div>
+      <div class="lk-row"><span class="lk-l">Pitch</span>${seg("voicePitch", [[0.85, "Lower"], [1, "Normal"], [1.15, "Higher"]])}</div>
+      <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button><span class="note">${voices.length} voices on this ${/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone"}</span></div>
+      <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
+  }
+  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || addOpen || cfgOpen || aiOpen)); }
 
   // ---- interactions ----
   const shareText = (title, by, body) => `${title}\n\n${String(body || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")}\n\n✦ Written by ${PN[by] || by} in Stockit. Not financial advice.`;
@@ -1649,6 +2048,22 @@ function clientApp() {
       case "tab": tab = v; if (v !== "ideas") send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "refresh": if (!progress) send("refresh", { force: true }); break;
+      case "newsopen": openNews(t.dataset.s, v); break;
+      case "newsclose": newsOpen = null; renderNews(); break;
+      case "tldrretry": if (newsOpen) { tl[newsOpen.l] = "loading"; send("tldr", { s: newsOpen.s, l: newsOpen.l, id: newsOpen.l, force: true }); renderNews(); } break;
+      case "listentldr": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
+      case "listenbrief": if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
+      case "listenstory": { const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
+      case "listenflash": { const items = flashItems(); if (items.length) speak("Flash", items); else window.toast("No headlines to read yet"); break; }
+      case "plpause": togglePause(); break;
+      case "plnext": skipItem(); break;
+      case "plstop": stopSpeaking(); break;
+      case "voiceset": {
+        const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
+        if (k === "speechEngine" && tts.on) stopSpeaking();
+        S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
+      }
+      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how Stockit will read your briefing, stories and headlines to you." }]); break;
       case "open": openSym = v; explainKey = null; rmArmed = null; renderDetail(); send("detail", { s: v }); $("#detail").scrollTop = 0; break;
       case "close": openSym = null; renderDetail(); break;
       case "range": range = v; send("set", { k: "range", v }); renderDetail(); break;
@@ -1713,6 +2128,14 @@ function clientApp() {
   });
   // Typed values and menus arrive through "change"
   document.addEventListener("change", e => {
+    if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
+    if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
+    if (e.target.classList && e.target.classList.contains("ttsinstr")) { S.settings.ttsInstructions = e.target.value.trim(); send("set", { k: "ttsInstructions", v: S.settings.ttsInstructions }); return; }
+    if (e.target.classList && e.target.classList.contains("voicesel")) {
+      S.settings.voiceURI = e.target.value; send("set", { k: "voiceURI", v: e.target.value });
+      if (tts.on && tts.engine === "device") { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
+      return;
+    }
     const el = e.target;
     if (el.classList && el.classList.contains("modelsel")) send("aimodel", { p: el.dataset.p, v: el.value });
     else if (el.classList && el.classList.contains("cfgin") && el.dataset.k) {
@@ -1996,7 +2419,64 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 @keyframes spSweep{0%{opacity:0}15%{opacity:1}100%{opacity:1;transform:translateX(0)}}
 @keyframes spUp{to{opacity:1;transform:none}}
 @keyframes spOut{to{opacity:0;visibility:hidden}}
+/* Flash: each stock with its top headlines */
+.flash{display:flex;flex-direction:column;gap:10px;margin:6px 0 4px}
+.fl{display:grid;grid-template-columns:minmax(84px,30%) 1fr;gap:12px;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px}
+.fl.speaking{box-shadow:inset 4px 0 0 var(--amber)}
+.fl-s{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding-right:10px;border-right:1px solid var(--rule)}
+.fl-s b{font:700 calc(18px * var(--ts))/1.1 var(--display);letter-spacing:-.01em}
+.fl-s small{font-size:calc(12.5px * var(--ts));color:var(--muted);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.fl-s .pill{margin-top:4px}
+.fl-w{font-size:calc(11.5px * var(--ts));color:var(--muted);font-weight:600}
+.fl-n{display:flex;flex-direction:column;min-width:0}
+.fl-h{display:block;width:100%;text-align:left;padding:7px 0;border-bottom:1px solid var(--rule)}
+.fl-h:first-child{padding-top:0}
+.fl-h:last-child{border-bottom:0;padding-bottom:0}
+.fl-h b{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-weight:600;font-size:calc(14.5px * var(--ts));line-height:1.32}
+.fl-h small{display:block;font-size:calc(12px * var(--ts));color:var(--muted);margin-top:2px}
+body.d-compact .fl{padding:9px;gap:9px} body.d-tiny .fl-h small{display:none}
+/* TL;DR sheet */
+#newssheet{z-index:12}
+.tl .kicker{color:var(--muted);font-size:calc(13.5px * var(--ts));margin:2px 0 6px}
+.tl-h{font:700 calc(23px * var(--ts))/1.22 var(--display);margin:0 0 12px;letter-spacing:-.01em}
+.tli-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:calc(12.5px * var(--ts));color:var(--muted);margin-bottom:4px}
+.tli-load{display:flex;align-items:center;gap:10px;color:var(--ink-2);font-size:calc(14px * var(--ts));padding:14px 0}
+.tl-lead{font-size:calc(18px * var(--ts));line-height:1.5;font-weight:500;margin:10px 0 12px}
+html[data-font=serif] .tl-lead{font-family:var(--serif)}
+.tl-pts{padding-left:1.2em;margin:0 0 16px}
+.tl-pts li{font-size:calc(16px * var(--ts));line-height:1.55;margin-bottom:8px;color:var(--ink-2)}
+.tl-why{background:var(--sheet);border-left:3px solid var(--signal);border-radius:0 10px 10px 0;padding:10px 14px;margin:0 0 16px}
+.tl-why p{margin:4px 0 0;color:var(--ink-2);font-size:calc(15px * var(--ts));line-height:1.5}
+.tl-listen{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 18px}
+.primary.block{display:block;width:100%;text-align:center;padding:13px 16px;margin:6px 0 4px}
+.err{color:var(--danger)}
+.busy-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:bdspin .8s linear infinite}
+@keyframes bdspin{to{transform:rotate(360deg)}}
+/* Read aloud (as in BlogPulse) */
+.ico{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px;margin-right:5px;flex:none}
+.ico path:first-child{fill:currentColor;stroke:none}
+.sm .ico{width:15px;height:15px}
+.sm{display:inline-flex;align-items:center}
+.listen{display:inline-flex;align-items:center;padding:9px 14px;border-radius:20px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(14.5px * var(--ts))}
+.voicesel{display:block;width:100%;margin-top:8px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
+.cfgin.wide{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
+#player{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:30;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:var(--ink);color:var(--paper);box-shadow:0 8px 28px rgba(0,0,0,.28)}
+#player[hidden]{display:none}
+.pl-info{flex:1;min-width:0}
+.pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-info b{font-size:14.5px}
+.pl-info small{font-size:12px;opacity:.75}
+.pl-btn{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;flex:none;background:rgba(127,127,127,.22)}
+.pl-btn svg{width:20px;height:20px;fill:currentColor}
+.eq{display:flex;align-items:flex-end;gap:2px;height:16px;flex:none}
+.eq i{width:3px;height:100%;background:currentColor;border-radius:2px;animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:-.35s}.eq i:nth-child(3){animation-delay:-.7s}
+#player.paused .eq i{animation:none;height:40%}
+@keyframes eq{0%,100%{height:30%}50%{height:100%}}
+body.playing #main{padding-bottom:96px}
+body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 @media (prefers-reduced-motion:reduce){
+  .eq i{animation:none;height:60%} .busy-dot{animation-duration:2.4s}
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
   .splash{animation:spOut .3s ease 1.6s forwards!important}
   .sheet,#aisheet,#toast,.switch,.switch::after{transition:none}
@@ -2039,6 +2519,14 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="addsheet" class="sheet" aria-label="Add stocks"></div>
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
+<div id="newssheet" class="sheet" aria-label="TL;DR"></div>
+<div id="player" hidden role="region" aria-label="Reading aloud">
+  <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+  <div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>
+  <button id="plPause" class="pl-btn" data-act="plpause" aria-label="Pause"></button>
+  <button class="pl-btn" data-act="plnext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h3v14h-3z"/></svg></button>
+  <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
+</div>
 <div id="toast" role="status"></div>
 <script>
 // Launch screen (app-blueprints · launch-screen 1.0.0): first, self-contained
