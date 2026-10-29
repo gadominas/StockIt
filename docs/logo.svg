@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Stockit logo: a price line climbing through a faint chart frame to an emerald dot, with a blue average line underneath">
+  <rect width="240" height="240" rx="54" fill="#0E1116"/>
+  <path d="M58 62 V182 H190" fill="none" stroke="#F6F7F9" stroke-opacity="0.35" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M74 150 L104 116 L130 136 L170 88" fill="none" stroke="#F6F7F9" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="170" cy="88" r="14" fill="#34D399"/>
+  <circle cx="175" cy="83" r="4.5" fill="#F6F7F9"/>
+  <path d="M78 164 H148" fill="none" stroke="#60A5FA" stroke-width="7" stroke-linecap="round"/>
+</svg>
