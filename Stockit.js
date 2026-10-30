@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.13.0';
+const VERSION = '1.13.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -46,7 +46,7 @@ const BLUEPRINTS = [
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
-  { id: 'ai-invitation', name: 'AI invitation', version: '1.0.1', since: '1.13.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.1.0', since: '1.13.0' },
 ];
 
 // ---------- config ----------
@@ -1511,11 +1511,18 @@ const INVITE_GAP = 3;          // days between invitations (about twice a week)
 const INVITE_GAP_SLOW = 7;     // days between invitations after the 4th "Later"
 function aiInviteDue(now = Date.now()) {
   const s = settings.aiInvite || (settings.aiInvite = {});
-  if (aiKey()) { if (!s.keyed) { s.keyed = true; saveAll(); } return false; }   // has a key, or had one: never again
-  if (!s.first) { s.first = now; saveAll(); return false; }   // first launch: let the app speak for itself first
-  if (s.off || s.keyed) return false;
-  if (now - s.first < INVITE_DAY) return false;
+  if (s.keyed) { s.hadKey = true; delete s.keyed; }   // 1.0.x called it "keyed"
+  if (aiKey()) { if (!s.hadKey) { s.hadKey = true; saveAll(); } return false; }   // a key means AI is on: nothing to invite to
+  if (s.off) return false;   // "Don't remind me again"
+  if (!s.first) { s.first = now; saveAll(); }
+  if (!s.hadKey && now - s.first < INVITE_DAY) return false;   // a new user gets a day with the app first; someone who removed a key doesn't
   return now >= (s.next || 0);
+}
+// Removing the last key turns AI off: invite again from the next launch (call this in the "airm" action).
+function aiInviteKeyRemoved() {
+  if (aiKey()) return;
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  s.hadKey = true; s.next = 0; saveAll();
 }
 // The page reports what happened: "shown", "open", "later" or "never".
 function aiInviteNote(what, now = Date.now()) {
@@ -1741,14 +1748,13 @@ async function handle(m) {
     case "aikey": {
       const p = PROVIDERS[m.v] ? m.v : settings.aiProvider;
       if (await askKey(p)) {
-        settings.aiInvite = Object.assign(settings.aiInvite || {}, { keyed: true });   // AI invitation: a key ends it for good
         settings.ai = true; saveAll(); push();
         try { const n = await fetchModels(p); toast(`${PROVIDERS[p]} key saved — ${n} models available`); }
         catch (e) { toast(`Key saved, but checking it failed: ${String(e.message || e).slice(0, 70)}`); }
       }
       saveAll(); return push();
     }
-    case "airm": { const p = m.v; if (PROVIDERS[p]) { removeKey(p); toast(`${PROVIDERS[p]} key removed`); } saveAll(); return push(); }
+    case "airm": { const p = m.v; if (PROVIDERS[p]) { removeKey(p); toast(`${PROVIDERS[p]} key removed`); aiInviteKeyRemoved(); } saveAll(); return push(); }
     case "aiprov": if (PROVIDERS[m.v]) settings.aiProvider = m.v; saveAll(); return push();
     case "aimodels":
       try { const n = await fetchModels(m.v); toast(`${n} ${PROVIDERS[m.v]} models found`); }
