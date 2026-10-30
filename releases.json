@@ -4,6 +4,39 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.4.1",
+      "date": "2026-10-30",
+      "title": "Opens every time",
+      "highlights": [
+        {
+          "icon": "⚡",
+          "title": "No more blank screen",
+          "text": "Opening Stockit from the widget shows the app at once; your stocks load behind it."
+        },
+        {
+          "icon": "👆",
+          "title": "Safe with quick taps",
+          "text": "Tapping the widget several times no longer stacks up copies of the app."
+        },
+        {
+          "icon": "🩺",
+          "title": "Start-up log",
+          "text": "Settings › Updates shows what happened the last times Stockit opened."
+        }
+      ],
+      "changes": [
+        "An empty dark window appears first and the page is built inside it while it's visible, so iOS always draws it (the fix BlogPulse 1.9.2 uses)",
+        "Stocks, prices, AI texts and usage are read after the first screen is shown, in pieces, each with a time limit; \"Loading your stocks…\" shows meanwhile",
+        "If iCloud is slow to hand over a file, Stockit opens with what it has, says so, and saves nothing over your data until you reopen it",
+        "Refreshing prices starts 0.7 s after the first screen, the update check after 3.5 s and the widget icon after 6 s",
+        "Only one Stockit window at a time: a new run waits at most 1.5 s for an older one, then opens anyway",
+        "If opening ever stalls, the screen shows what Stockit was waiting for"
+      ],
+      "fixes": [
+        "Blank screen when opening Stockit from the widget"
+      ]
+    },
+    {
       "version": "1.4.0",
       "date": "2026-10-30",
       "title": "Tap a stock, hear its news",

@@ -2,6 +2,25 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.4.1 (2026-10-30): Opens every time
+
+- ⚡ **No more blank screen**: Opening Stockit from the widget shows the app at once; your stocks load behind it.
+- 👆 **Safe with quick taps**: Tapping the widget several times no longer stacks up copies of the app.
+- 🩺 **Start-up log**: Settings › Updates shows what happened the last times Stockit opened.
+
+**Changes**
+
+- An empty dark window appears first and the page is built inside it while it's visible, so iOS always draws it (the fix BlogPulse 1.9.2 uses)
+- Stocks, prices, AI texts and usage are read after the first screen is shown, in pieces, each with a time limit; "Loading your stocks…" shows meanwhile
+- If iCloud is slow to hand over a file, Stockit opens with what it has, says so, and saves nothing over your data until you reopen it
+- Refreshing prices starts 0.7 s after the first screen, the update check after 3.5 s and the widget icon after 6 s
+- Only one Stockit window at a time: a new run waits at most 1.5 s for an older one, then opens anyway
+- If opening ever stalls, the screen shows what Stockit was waiting for
+
+**Fixes**
+
+- Blank screen when opening Stockit from the widget
+
 ## 1.4.0 (2026-10-30): Tap a stock, hear its news
 
 - 👆 **Tap a stock to listen**: Tap any stock in Flash and its news starts playing; tap again to pause.
