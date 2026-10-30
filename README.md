@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -69,7 +69,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 ## A quick tour
 
 <p align="center">
-  <img src="docs/screenshots/16-flash.png" width="250" alt="Flash: each stock on the left with its top three headlines on the right">&nbsp;
+  <img src="docs/screenshots/16-flash.png" width="250" alt="Flash: each stock with your shares, today's profit, view, analysts and crowd on the left, its top three headlines on the right">&nbsp;
   <img src="docs/screenshots/17-tldr.png" width="250" alt="A TL;DR of an NVIDIA headline: the gist, key points and what it could mean for NVDA">&nbsp;
   <img src="docs/screenshots/18-listen.png" width="250" alt="The TL;DR being read aloud, with the player bar at the bottom and Read the full article">
 </p>
@@ -110,7 +110,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings. |
 | 📊 **A page per stock** | 1M, 6M, 1Y and 5Y chart, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
-| ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Headlines are ranked by how recent they are, how well known the source is, and whether they name the company. |
+| ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
 | 🔊 **Read aloud** | **Listen** to the briefing, a stock's story, any TL;DR or the whole Flash. Pause, skip or stop from the player at the bottom. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
@@ -130,7 +130,22 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 
 <img src="docs/screenshots/17-tldr.png" width="250" align="right" alt="A TL;DR of a headline with Listen and Read the full article">
 
-Open the **Flash** tab for a two-minute scan of everything you own and watch: each stock with its price move on the left, its top headlines on the right (three by default, 1 to 5 in **Settings › Headlines**).
+Open the **Flash** tab for a two-minute scan of everything you own and watch: each stock on the left, its top headlines on the right (three by default, 1 to 5 in **Settings › Headlines**). Headlines that name the company and come from well-known sources rank first; quote and listing pages are left out.
+
+The left column shows what matters for that stock at a glance:
+
+- **Today's move** and, for stocks you own, **your shares** and **today's profit or loss** in the stock's currency.
+- **Stockit's view:** ✦ buy, hold or sell from the AI, or the price trend without a key.
+- **Analysts:** the average Wall Street rating from Yahoo Finance, from 1 (Strong Buy) to 5 (Sell).
+- **Crowd:** how StockTwits posts lean, with a bullish-versus-bearish bar.
+
+Once you've read a card, tap **✓ Read — fold it**. It shrinks to one line and stays folded until a newer headline arrives; then it opens again, marked **New since you folded it**. **Fold all** and **Open all** are at the top, and **Listen** reads only the open cards.
+
+<p align="center">
+  <img src="docs/screenshots/16-flash.png" width="250" alt="Flash cards with shares, today's profit, view, analysts and crowd beside the headlines">&nbsp;
+  <img src="docs/screenshots/20-flash-folded.png" width="250" alt="Flash with two cards folded to one line after reading">
+</p>
+<p align="center"><sub><b>Flash</b>: your stake, the view and the mood beside the news · <b>Folded</b> cards once read</sub></p>
 
 Tap a headline to open its **TL;DR**:
 
@@ -201,6 +216,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Find new ideas | Open **✦ Ideas** and tap **Find new ideas**; **Add to watchlist** keeps one |
 | Change shares or move a stock | Open the stock › **Manage** › **Edit shares**, **Move to watchlist** or **Remove** |
 | Scan the news | Open **Flash** |
+| Put a read card away | Tap **✓ Read — fold it**; tap the folded line to open it again. **Fold all** and **Open all** are at the top |
 | Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
 | Read the whole article | In the TL;DR, tap **Read the full article at …** |
 | Listen instead of reading | Tap **Listen** on the briefing, a story, a TL;DR or Flash. Pause, skip or stop from the player |

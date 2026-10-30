@@ -21,7 +21,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -181,7 +181,7 @@ const write = (n, v) => fm.writeString(P(n), JSON.stringify(v));
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch",                    // remembered picks
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {},    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false,                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1016,7 +1016,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"),
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {},
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1088,6 +1088,8 @@ async function handle(m) {
     case "set":
       if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
+      if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
+        settings.flashFold = Object.fromEntries(Object.entries(m.v).filter(([s, t]) => stocks.some(x => x.s === s) && isFinite(t)));
       write("settings", settings);
       if (m.k === "widgetMoney") saveWidget(widgetSnapshot());
       return;
@@ -1762,28 +1764,55 @@ function clientApp() {
   }
 
   // ---- Flash: each stock's top headlines, a TL;DR per headline, and reading aloud ----
-  const MAJOR = /reuters|bloomberg|financial times|wall street journal|\bwsj\b|cnbc|barron|marketwatch|economist|associated press|yahoo finance|investor's business|morningstar|nikkei|forbes|fortune/i;
+  const MAJOR = /reuters|bloomberg|financial times|wall street journal|\bwsj\b|cnbc|barron|marketwatch|economist|associated press|yahoo finance|investor's business|morningstar|nikkei|forbes|fortune|handelsblatt/i;
+  const QUOTE_PAGE = /stock price, news, quote|bond yield and price|price, chart|quote & history|historical prices/i;   // listing pages, not news
   function topNews(x) {
     const now = Date.now(), tick = x.s.split(/[.=^-]/)[0].replace(/[^A-Za-z0-9]/g, ""), first = String(x.name || "").split(/[\s,.]/)[0].toLowerCase();
     const about = h => (tick && new RegExp("\\b" + tick + "\\b", "i").test(h.t)) || (first.length > 2 && h.t.toLowerCase().includes(first));
-    const score = h => Math.exp(-(now - h.at) / 864e5 / 1.5) + (MAJOR.test(h.p) ? 0.5 : 0) + (about(h) ? 0.4 : 0);
-    return (x.news || []).map(h => [h, score(h)]).sort((a, b) => b[1] - a[1]).slice(0, S.cfg.flashPerStock || 3).map(a => a[0]);
+    const score = h => Math.exp(-(now - h.at) / 864e5 / 1.5) + (MAJOR.test(h.p) ? 0.5 : 0) + (about(h) ? 0.4 : -0.8);   // headlines that don't name the company sink
+    return (x.news || []).filter(h => !QUOTE_PAGE.test(h.t)).map(h => [h, score(h)]).sort((a, b) => b[1] - a[1]).slice(0, S.cfg.flashPerStock || 3).map(a => a[0]);
   }
   const flashOrder = () => S.stocks.slice().sort((a, b) => (a.list === "own" ? 0 : 1) - (b.list === "own" ? 0 : 1)
     || ((b.sh || 0) * (b.price || 0)) - ((a.sh || 0) * (a.price || 0)) || a.s.localeCompare(b.s));
+  // A folded card stays folded until a newer headline arrives; then it opens again, marked New.
+  const fold = () => S.settings.flashFold || {};
+  const newest = x => Math.max(0, ...topNews(x).map(h => h.at || 0));
+  const isFolded = x => fold()[x.s] != null && newest(x) <= fold()[x.s];
+  function setFold(syms, on) {
+    const f = Object.assign({}, fold());
+    syms.forEach(s => { const x = byS(s); if (on && x) f[s] = newest(x); else delete f[s]; });
+    S.settings.flashFold = f; send("set", { k: "flashFold", v: f }); render();
+  }
+  const ratingWord = r => { const m = String(r || "").match(/^\s*([\d.]+)\s*-\s*(.+)$/); return m ? [m[2].trim(), m[1]] : r ? [String(r), ""] : null; };
+  function flashFacts(x) {   // the left column: your position, today's money, Stockit's view, analysts and the crowd
+    const d = dayPct(x), own = x.list === "own" && x.sh, todayMoney = own && x.prev != null && x.price != null ? x.sh * (x.price - x.prev) : null;
+    const r = ratingWord(x.f && x.f.rating), c = x.crowd, crowd = c && c.bull + c.bear >= 5 ? Math.round(c.bull / (c.bull + c.bear) * 100) : null;
+    return `<span class="pill ${cls(d)}">${pct(d)}</span>
+      ${own ? `<span class="fl-k">${nf(x.sh, x.sh % 1 ? 2 : 0)} share${x.sh === 1 ? "" : "s"}</span><span class="fl-m ${cls(todayMoney)}">${todayMoney != null ? signed(todayMoney, x.cur) + " today" : ""}</span>`
+        : x.list !== "own" ? `<span class="fl-k">Watching</span>` : `<span class="fl-k">Shares not set</span>`}
+      ${x.sig ? sigChip(x.sig) : x.trend ? `<span class="chip t-${x.trend.trend}">${TREND[x.trend.trend]}</span>` : ""}
+      ${r ? `<span class="fl-r" title="Average analyst rating">Analysts <b>${esc(r[0])}</b>${r[1] ? ` <span class="muted">${esc(r[1])}</span>` : ""}</span>` : ""}
+      ${crowd != null ? `<span class="fl-r" title="StockTwits crowd mood">Crowd <b class="${crowd >= 50 ? "up" : "down"}">${crowd}% bullish</b></span><span class="flmood" aria-hidden="true"><i style="width:${crowd}%"></i></span>` : ""}`;
+  }
   function flashHTML() {
     if (!S.stocks.length) return `<section class="empty"><h2>No stocks yet</h2><p>Add a stock and its top headlines appear here, each with a TL;DR.</p><button class="primary" data-act="addopen">Add stocks</button></section>`;
-    const n = S.cfg.flashPerStock || 3;
-    return `<div class="listbar"><span>Top ${n} headline${n === 1 ? "" : "s"} for each stock</span><button class="sm" data-act="listenflash">${SPK}Listen</button></div>
-      <div class="flash">${flashOrder().map(x => {
-        const d = dayPct(x), top = topNews(x);
-        return `<article class="fl" id="c-fl-${esc(x.s)}"><button class="fl-s" data-act="open" data-v="${esc(x.s)}" aria-label="Open ${esc(x.s)}">
-          <b>${esc(x.s)}</b><small>${esc(String(x.name || "").replace(/,? (Inc\.?|Corporation|Corp\.?|N\.V\.|plc|Ltd\.?|Holdings?|Company)$/i, ""))}</small>
-          <span class="pill ${cls(d)}">${pct(d)}</span>${x.list === "own" ? "" : `<span class="fl-w">Watching</span>`}</button>
-          <div class="fl-n">${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
-            : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}</div></article>`;
+    const n = S.cfg.flashPerStock || 3, list = flashOrder(), folded = list.filter(isFolded).length;
+    return `<div class="listbar"><span>${folded ? `Top ${n} per stock · ${folded} read` : `Top ${n} headline${n === 1 ? "" : "s"} per stock`}</span><div class="lb-a">
+        ${folded ? `<button class="sm" data-act="unfoldall">Open all</button>` : list.length > 1 ? `<button class="sm" data-act="foldall">Fold all</button>` : ""}
+        <button class="sm" data-act="listenflash">${SPK}Listen</button></div></div>
+      <div class="flash">${list.map(x => {
+        const top = topNews(x), f = isFolded(x), isNew = fold()[x.s] != null && !f;
+        const short = esc(String(x.name || "").replace(/,? (Inc\.?|Corporation|Corp\.?|N\.V\.|plc|Ltd\.?|Holdings?|Company|AG|SE|S\.E\.|S\.A\.)$/i, ""));
+        if (f) return `<article class="fl folded" id="c-fl-${esc(x.s)}"><button class="fl-fold" data-act="fold" data-v="${esc(x.s)}" data-on="0" aria-label="Open ${esc(x.s)} headlines">
+            <b>${esc(x.s)}</b><span class="pill ${cls(dayPct(x))}">${pct(dayPct(x))}</span>${x.sig ? sigChip(x.sig) : ""}
+            <span class="fl-fs">${top.length} read · newest ${top.length ? rel(newest(x)) : "—"}</span><span class="chev" aria-hidden="true">›</span></button></article>`;
+        return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="open" data-v="${esc(x.s)}" aria-label="Open ${esc(x.s)}">
+            <b>${esc(x.s)}</b><small>${short}</small></button>${flashFacts(x)}</div>
+          <div class="fl-n">${isNew ? `<span class="fl-new">New since you folded it</span>` : ""}${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
+            : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}
+            ${top.length ? `<button class="fl-done" data-act="fold" data-v="${esc(x.s)}" data-on="1">✓ Read — fold it</button>` : ""}</div></article>`;
       }).join("")}</div>
-      <p class="note pad">Tap a headline for its TL;DR. Headlines from Yahoo Finance${S.settings.newsWeb ? " and the web" : ""}; summaries can miss details. Not financial advice.</p>`;
+      <p class="note pad">Tap a headline for its TL;DR; fold a card once you've read it, and it opens again when new headlines arrive. Analysts is the average Wall Street rating from Yahoo Finance; Crowd is the StockTwits mood. Not financial advice.</p>`;
   }
   const newsOf = (s, l) => { const x = byS(s); return x && (x.news || []).find(h => h.l === l); };
   function openNews(s, l) {
@@ -1833,7 +1862,7 @@ function clientApp() {
       .concat(list("Why " + st.signal, st.reasons), list("What could go wrong", st.risks), list("What to watch", st.watch));
   }
   function flashItems() {
-    return flashOrder().map(x => ({ id: "fl-" + x.s, title: x.s, text: topNews(x).length
+    return flashOrder().filter(x => !isFolded(x)).map(x => ({ id: "fl-" + x.s, title: x.s, text: topNews(x).length
       ? `${x.name || x.s}. ` + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ")
       : "" })).filter(it => it.text);
   }
@@ -2049,6 +2078,9 @@ function clientApp() {
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "refresh": if (!progress) send("refresh", { force: true }); break;
       case "newsopen": openNews(t.dataset.s, v); break;
+      case "fold": setFold([v], t.dataset.on === "1"); break;
+      case "foldall": setFold(flashOrder().filter(x => topNews(x).length).map(x => x.s), true); window.scrollTo(0, 0); break;
+      case "unfoldall": setFold(Object.keys(fold()), false); break;
       case "newsclose": newsOpen = null; renderNews(); break;
       case "tldrretry": if (newsOpen) { tl[newsOpen.l] = "loading"; send("tldr", { s: newsOpen.s, l: newsOpen.l, id: newsOpen.l, force: true }); renderNews(); } break;
       case "listentldr": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
@@ -2423,11 +2455,28 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .flash{display:flex;flex-direction:column;gap:10px;margin:6px 0 4px}
 .fl{display:grid;grid-template-columns:minmax(84px,30%) 1fr;gap:12px;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px}
 .fl.speaking{box-shadow:inset 4px 0 0 var(--amber)}
-.fl-s{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;padding-right:10px;border-right:1px solid var(--rule)}
+.fl-s{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;text-align:left}
 .fl-s b{font:700 calc(18px * var(--ts))/1.1 var(--display);letter-spacing:-.01em}
 .fl-s small{font-size:calc(12.5px * var(--ts));color:var(--muted);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .fl-s .pill{margin-top:4px}
 .fl-w{font-size:calc(11.5px * var(--ts));color:var(--muted);font-weight:600}
+.fl-l{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0;padding-right:10px;border-right:1px solid var(--rule)}
+.fl-l .fl-s{border-right:0;padding-right:0}
+.fl-k{font-size:calc(13px * var(--ts));color:var(--ink-2);font-weight:600}
+.fl-m{font-size:calc(13px * var(--ts));font-weight:700;margin-top:-4px}
+.fl-r{font-size:calc(12px * var(--ts));color:var(--muted);line-height:1.3}
+.fl-r b{color:var(--ink);font-weight:700}
+.flmood{display:flex;width:100%;height:5px;margin-top:-3px;border-radius:3px;overflow:hidden;background:var(--down);opacity:.85}
+.flmood i{flex:none;height:100%;background:var(--up)}
+.fl-done{align-self:flex-start;margin-top:8px;font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:6px 0}
+.fl-new{align-self:flex-start;font-size:calc(11.5px * var(--ts));font-weight:700;color:var(--amber);margin-bottom:4px}
+.fl.folded{display:block;padding:0;opacity:.82}
+.fl-fold{display:flex;align-items:center;gap:8px;width:100%;padding:11px 12px;text-align:left}
+.fl-fold b{font:700 calc(16px * var(--ts))/1.1 var(--display)}
+.fl-fs{flex:1;min-width:0;text-align:right;font-size:calc(12px * var(--ts));color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fl-fold .chev{font-size:20px;line-height:1;color:var(--muted);transform:rotate(90deg)}
+.lb-a{display:flex;gap:6px}
+.chip.t-up{color:var(--up);box-shadow:inset 0 0 0 1px currentColor} .chip.t-flat{color:var(--amber);box-shadow:inset 0 0 0 1px currentColor} .chip.t-down{color:var(--down);box-shadow:inset 0 0 0 1px currentColor}
 .fl-n{display:flex;flex-direction:column;min-width:0}
 .fl-h{display:block;width:100%;text-align:left;padding:7px 0;border-bottom:1px solid var(--rule)}
 .fl-h:first-child{padding-top:0}
