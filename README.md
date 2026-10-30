@@ -30,30 +30,31 @@ An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No ac
 
 > Screenshots show sample stocks, prices and headlines.
 
-## Install in under a minute
+## Install
 
-You need an iPhone or iPad and the free **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** app. Nothing else: no computer, no account, no sign-up.
-
-1. Install **Scriptable** from the App Store and open it.
-2. Tap **+**, paste the contents of [`Install Stockit.js`](Install%20Stockit.js), and tap **Run** (▶).
+1. Get **[Scriptable](https://apps.apple.com/app/scriptable/id1405459188)** (free) on your iPhone or iPad.
+2. In Scriptable, tap **+**, paste these two lines, name the script *Stockit Installer*, and tap **▶**:
+   ```js
+   const code = await new Request("https://raw.githubusercontent.com/gadominas/Stockit/main/install.js").loadString();
+   await eval("(async () => {" + code + "\n})()");
+   ```
 3. Tap **Open Stockit** and add your first stocks: search by name or ticker, paste a list like `AAPL 10 @ 150`, open a broker CSV, or use a screenshot.
 
-That's it. From now on Stockit tells you when a new version is out and updates itself with one tap.
+To update, tap **Update now** when Stockit offers a new version, or run *Stockit Installer* again. Your stocks, strategies and settings are kept.
 
 <details>
-<summary><b>Prefer to install by hand?</b></summary>
+<summary><b>Install by hand</b></summary>
 
-- **Download the file:** save [`Stockit.js`](Stockit.js) to **iCloud Drive › Scriptable**. It appears in Scriptable automatically.
-- **Copy and paste:** in Scriptable, tap **+**, paste the whole of `Stockit.js`, and name the script *Stockit*.
+Rather not use the loader? Paste [`install.js`](install.js) or [`Stockit.js`](Stockit.js) into a new script in Scriptable yourself.
 
 </details>
 
-**Three optional extras, each takes a minute:**
+What else you need:
 
-- **Add AI:** open **Settings › AI settings**, tap **Add key**, and paste a [Claude](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys) API key. This switches on the daily briefing, a story and a view per stock, ideas and screenshot import.
-- **The AI invitation:** without a key, Stockit now and then shows a short card with what AI adds (the ✦ briefing, ideas and stock stories) and a **Turn on AI** button that opens AI settings. At most every 3 days, never during a demo (privacy on) or Listen; **Don't remind me again** ends it.
-- **Add the widget:** see [Home-screen widget](#home-screen-widget).
-- **Put Stockit on your Home Screen:** make a Shortcut with **Run Script › Stockit**, add it to the Home Screen, and use [`docs/icon-1024.png`](docs/icon-1024.png) as its icon.
+- **Nothing else is required:** no computer, no account, no sign-up.
+- **Optional: AI.** Open **Settings › AI settings**, tap **Add key**, and paste a [Claude](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys) API key. This switches on the daily briefing, a story and a view per stock, ideas and screenshot import. Without a key, Stockit now and then shows what AI adds, with a **Turn on AI** button.
+- **Optional: the widget.** See [Home-screen widget](#home-screen-widget).
+- **Optional: a Home Screen icon.** Make a Shortcut with **Run Script › Stockit**, add it to the Home Screen, and use [`docs/icon-1024.png`](docs/icon-1024.png) as its icon.
 
 ## Why Stockit
 

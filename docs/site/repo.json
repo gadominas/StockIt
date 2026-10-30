@@ -1,0 +1,28 @@
+{
+  "description": "📈 Your stocks, explained. A one-file iPhone app for Scriptable: portfolio, watchlist, key numbers in plain English, headlines and an optional AI daily briefing. No account, no server. Not financial advice.",
+  "homepage": null,
+  "topics": [
+    "ai",
+    "claude",
+    "investing",
+    "ios",
+    "ios-widget",
+    "iphone",
+    "javascript",
+    "llm",
+    "openai",
+    "personal-finance",
+    "portfolio-tracker",
+    "scriptable",
+    "single-file",
+    "stock-market",
+    "stocks",
+    "stocktwits",
+    "watchlist",
+    "yahoo-finance"
+  ],
+  "install": {
+    "kept": "Your stocks, strategies and settings are kept.",
+    "firstRun": "Open it and add your first stocks."
+  }
+}
