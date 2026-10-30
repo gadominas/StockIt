@@ -29,12 +29,21 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.15.0';
+const VERSION = '1.16.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
 const KC_UPDATE_SNOOZE = 'stockit-update-snooze';   // Keychain key, unique per app
+
+// ── Anonymous usage counts (opt-in), sent to PostHog (app-blueprints · usage-analytics) ──
+// Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
+// (made on this iPhone, not linked to any account), the app version and counts: never names, IDs from
+// other services, text, photos or anything the app read. Events are anonymous (no person profiles).
+// The key is PostHog's project key, made to sit in public apps: it can only add events.
+// HOST must be the region the project lives in: PostHog's other region answers "accepted" and then drops the events.
+const USAGE = { HOST: 'https://us.i.posthog.com', KEY: 'phc_yAi2PxJCRioWEKLF3uockdCf3QvyQdNABivwqpE4NCWR' };   // the shared project
+const KC_INSTALL = 'stockit-install-id';
 
 // ───────── Blueprints ─────────
 // Shared blueprints this app was built with (github.com/gadominas/app-blueprints). One line per blueprint, in this exact shape:
@@ -47,6 +56,7 @@ const BLUEPRINTS = [
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
+  { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
 ];
 
 // ---------- config ----------
@@ -253,6 +263,7 @@ const settings = Object.assign(
     speechEngine: "device", voiceURI: "", voiceRate: 1, voicePitch: 1, voiceGender: "all",   // Listening: iPhone voice
     ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",                    // Listening: ✦ AI voice (OpenAI)
     checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     theme: "auto", density: "comfortable", font: "sans", textSize: 1,           // Appearance
     lastRefresh: 0 },                                                           // internal state
   await load("settings", {})
@@ -281,6 +292,57 @@ async function loadData() {
 
 function saveAll() {
   write("stocks", stocks); write("market", market); write("insights", insights); write("settings", settings);
+}
+
+let usageQueue = [], usageTimer = null;
+const usageAvailable = () => !!USAGE.KEY;
+const usageOn = () => usageAvailable() && !!settings.shareUsage;
+function installId() {
+  if (Keychain.contains(KC_INSTALL)) return Keychain.get(KC_INSTALL);
+  const id = UUID.string().toLowerCase();
+  Keychain.set(KC_INSTALL, id);
+  return id;
+}
+function track(event, props = {}) {
+  if (!usageOn()) return;
+  try {
+    usageQueue.push({ event, timestamp: new Date().toISOString(),
+      properties: Object.assign({ distinct_id: installId(), $process_person_profile: false, app: APP_ID, app_version: VERSION, $lib: APP_ID }, props) });
+    if (usageQueue.length >= 25) flushUsage();
+    else if (!usageTimer) usageTimer = Timer.schedule(3000, false, () => { usageTimer = null; flushUsage(); });
+  } catch (e) {}
+}
+let usageLast = null;   // { at, events, ok, status, host, error }: shown in Settings › Privacy
+async function postUsage(host, batch) {
+  const r = new Request(host + '/batch/');
+  r.method = 'POST'; r.timeoutInterval = 10; r.headers = { 'Content-Type': 'application/json' };
+  r.body = JSON.stringify({ api_key: USAGE.KEY, batch });
+  let body = '';
+  try { body = await r.loadString(); } catch (e) { return { ok: false, status: 0, host, error: String(e.message || e) }; }
+  const status = (r.response && r.response.statusCode) || 0;
+  return { ok: status >= 200 && status < 300, status, host, error: status >= 200 && status < 300 ? '' : String(body || '').slice(0, 200) };
+}
+// Sends what's queued in one request. Never slows the app; if it fails, those counts are gone (and the log says why).
+async function flushUsage() {
+  if (!usageQueue.length) return usageLast;
+  if (!usageOn()) { usageQueue = []; return usageLast; }
+  const batch = usageQueue.splice(0, usageQueue.length);
+  const res = await postUsage(USAGE.HOST, batch);
+  usageLast = Object.assign({ at: Date.now(), events: batch.length }, res);
+  try { startLog(`usage: ${batch.length} event${batch.length === 1 ? '' : 's'} → ${res.ok ? 'sent to ' + res.host.replace('https://', '') : 'not sent: ' + (res.status ? 'HTTP ' + res.status + ' ' : '') + res.error}`); } catch (e) {}
+  return usageLast;
+}
+function usageStatus() {
+  const u = usageLast;
+  if (!u) return '';
+  const t = new Date(u.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return u.ok ? `Last sent ${t}: ${u.events} event${u.events === 1 ? '' : 's'}, accepted (${u.host.replace('https://', '')})`
+              : `Last try ${t} failed: ${u.status ? 'HTTP ' + u.status + ' ' : ''}${u.error}`;
+}
+function setUsage(on) {
+  settings.shareUsage = !!on; settings.usageAsked = true; saveAll();
+  if (on) track('usage_opt_in');
+  else { usageQueue = []; if (Keychain.contains(KC_INSTALL)) Keychain.remove(KC_INSTALL); }   // a fresh ID if switched on again
 }
 
 // ---------- network ----------
@@ -814,6 +876,7 @@ Include every symbol above in "stocks". Owned stocks matter most.`;
     insights.briefing = { headline: String(p.headline || "Your portfolio today").slice(0, 120), story: String(p.story || "").slice(0, 5000),
       mood: ["positive", "mixed", "negative"].includes(p.mood) ? p.mood : "mixed", watch: (p.watch || []).slice(0, 3).map(String),
       stocks: ss, by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now(), sig: briefingSig() };
+    track("briefing_made", { provider: settings.aiProvider });
     write("insights", insights); push(); saveWidget(widgetSnapshot());
   } catch (e) { toast("Briefing not written: " + String(e.message || e).slice(0, 90)); }
   finally { briefingBusy = false; call("onBusy", "briefing", false); }
@@ -841,6 +904,7 @@ Write the story of this stock right now as JSON in this exact shape:
       reasons: (o.reasons || []).slice(0, 3).map(String), risks: (o.risks || []).slice(0, 3).map(String), watch: (o.watch || []).slice(0, 3).map(String),
       news: (m.news || []).slice(0, Math.max(cfg("aiHeadlines"), 10)).map(h => ({ t: h.t, l: h.l, p: h.p })),
       by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now() };
+    track("story_made", { provider: settings.aiProvider });
     write("insights", insights); write("market", market); push(); saveWidget(widgetSnapshot());
   } catch (e) { toast("Story not written: " + String(e.message || e).slice(0, 90)); }
   finally { storyBusy.delete(sym); call("onBusy", "story:" + sym, false); }
@@ -909,6 +973,7 @@ JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2
     for (const s2 of tmp) if (!stocks.some(x => x.s === s2) && !previews.has(s2)) delete market[s2];
     const notes = {};
     for (const g of Array.isArray(o.strategies) ? o.strategies : []) if (g && strategies.some(x => x.id === g.id) && g.note) notes[g.id] = String(g.note).slice(0, 500);
+    track("ideas_made", { provider: settings.aiProvider });
     insights.ideas = { list: list.slice(0, n), notes, note: String(o.note || ""), style: settings.style, by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now() };
     write("insights", insights); push();
     if (!list.length) toast("No ideas could be checked against market data. Try again.");
@@ -940,6 +1005,7 @@ JSON: {"items":[{"symbol":"AAPL","name":"Apple","shares":null}]}`, 1200, "import
 }
 function reportAdd(r) {
   saveAll(); push(); saveWidget(widgetSnapshot());
+  if (r.added.length) track("stock_added", { count: r.added.length });
   const parts = [];
   if (r.added.length) parts.push(`Added ${r.added.length}: ${r.added.slice(0, 5).join(", ")}${r.added.length > 5 ? "…" : ""}`);
   if (r.updated.length) parts.push(`updated ${r.updated.length}`);
@@ -1293,6 +1359,7 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
     check = { at: Date.now(), shots: shots.length, thumbs: checkShots.map(x => x.thumb), broker: o.broker ? String(o.broker).slice(0, 60) : "", n: pos.length, items,
       total: num2(o.total), totalCur: o.totalCurrency ? String(o.totalCurrency) : "", mineTotal: tot ? { v: tot.value, cur: tot.cur } : null,
       totalInMine: tot && num2(o.total) != null ? convertCur(num2(o.total), o.totalCurrency || tot.cur, tot.cur) : null, by: settings.aiProvider };
+    track("portfolio_checked", { source: "screenshot" });
     push();
   } catch (e) { toast("Screenshots not read: " + String(e.message || e).slice(0, 90)); }
   finally { checkBusy = false; call("onBusy", "check", false); }
@@ -1495,10 +1562,11 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
+    usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO, appName: APP,
   };
 }
@@ -1591,7 +1659,7 @@ async function handle(m) {
     case "update-later": snoozeUpdate(); pendingUpdate = null; return;
     case "update-now": {
       let ok = false, msg = "";
-      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; clearUpdateSnooze(); }
+      try { msg = await applyUpdate(pendingUpdate); ok = true; pendingUpdate = null; clearUpdateSnooze(); track("app_updated", { from: VERSION, to: (String(msg).match(/[0-9]+\.[0-9]+\.[0-9]+/) || [""])[0] }); flushUsage(); }
       catch (e) { msg = String(e.message || e); }
       return call("__done", m.req, ok, msg);
     }
@@ -1606,6 +1674,7 @@ async function handle(m) {
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
+      if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
       if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
@@ -1675,6 +1744,14 @@ async function handle(m) {
       }
       return call("onHistory", m.s, m.v, hist[key]);
     }
+    case "usage-consent": setUsage(m.on === "1"); flushUsage(); return push();
+    case "usage-test": {
+      let ok = false, msg = "";
+      if (!usageOn()) msg = "Turn on Share anonymous usage first.";
+      else { track("usage_test"); const r = await flushUsage(); ok = !!(r && r.ok); msg = usageStatus() || "Nothing was sent."; }
+      return call("__done", m.req, ok, msg);
+    }
+    case "usage-listen": track("listened", { kind: ["brief", "story", "flash", "stock", "summary"].includes(m.kind) ? m.kind : "other", voice: settings.speechEngine === "ai" ? "ai" : "iphone" }); return;
     case "story": return runStory(m.s);
     case "briefing": return runBriefing(true);
     case "ideas": return runIdeas();
@@ -1724,6 +1801,7 @@ async function handle(m) {
       const text = String(m.text || "").trim().slice(0, 600);
       if (!text) return;
       strategies.unshift({ id: "g" + Date.now().toString(36), text, when: String(m.when || "").trim().slice(0, 80), status: "active", at: Date.now() });
+      track("strategy_saved", { from: "new" });
       write("strategies", strategies); return push();
     }
     case "stratretire": case "stratrestore": {
@@ -1743,6 +1821,7 @@ async function handle(m) {
       const text = String(m.text != null ? m.text : it.text).trim().slice(0, 600);
       if (text) strategies.unshift({ id: "g" + Date.now().toString(36), text, when: String(m.when != null ? m.when : it.when || "").trim().slice(0, 80), status: "active", at: Date.now(), from: "suggested" });
       ss.list = ss.list.filter(x => x.id !== m.v);
+      track("strategy_saved", { from: "suggested" });
       write("strategies", strategies); write("insights", insights); return push();
     }
     case "stratdismiss": { const ss = insights.stratSuggest; if (ss) { ss.list = ss.list.filter(x => x.id !== m.v); write("insights", insights); } return push(); }
@@ -1923,8 +2002,13 @@ function clientApp() {
       if (openSym && !byS(openSym) && previewWait !== openSym) openSym = null;
     if (previewWait && byS(previewWait)) previewWait = null;
     if (newsOpen && !S.stocks.some(x => x.s === newsOpen.s)) newsOpen = null;
-    renderAll();
+    renderAll(); renderUsageAsk();
   };
+  // Anonymous usage (app-blueprints · usage-analytics): the one-time question, under the header
+  function renderUsageAsk() {
+    const slot = document.getElementById("usageslot"); if (!slot) return;
+    slot.innerHTML = S.usageAsk ? `<section id="usageask" aria-label="Anonymous usage"><b>Help improve Stockit?</b><p>Share anonymous counts, like app opens and the briefings and stories made. Never your stocks, amounts, strategies or screenshots. You can change this in Settings.</p><div class="uabtns"><button class="sm primary" data-act="usage-yes">Yes, share</button><button class="sm" data-act="usage-no">No thanks</button></div></section>` : "";
+  }
   window.onProgress = (d, t) => { progress = t ? [d, t] : null; renderStatus(); };
   window.onSearch = res => { results = res; searching = false; renderAdd(); };
   window.onHistory = (s, r, h) => { hist[s + "|" + r] = h; histWant.delete(s + "|" + r); if (openSym === s) renderDetail(); };
@@ -2666,6 +2750,9 @@ function clientApp() {
         : "Add a Claude or OpenAI key for the briefing, stories, signals and ideas"}</small></div>
         <button class="sm ${S.settings.hasKey ? "" : "primary"}" data-act="aiopen">AI settings</button></div>
       <h3 class="sec">Listening</h3>${listenHTML()}
+      ${S.usageAvailable ? `<h3 class="sec">Privacy</h3>
+      <div class="srow"><div class="grow"><b>Share anonymous usage</b><small class="muted">Counts like app opens and the briefings and stories made, with a random install ID. Never your stocks, amounts, strategies or screenshots. Off removes the ID.</small></div><button class="switch ${S.settings.shareUsage ? "on" : ""}" data-act="toggle" data-v="shareUsage" aria-label="Share anonymous usage"></button></div>
+      <div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">${esc(S.usageStatus || "Sends one test event now and shows PostHog’s answer.")}</small></div><button class="sm" data-act="usage-test">Send test</button></div>` : ""}
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have Stockit ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
@@ -3228,11 +3315,11 @@ function clientApp() {
       case "unfoldall": setFold(Object.keys(fold()), false); break;
       case "newsclose": newsOpen = null; renderNews(); break;
       case "tldrretry": if (newsOpen) { tl[newsOpen.l] = "loading"; send("tldr", { s: newsOpen.s, l: newsOpen.l, id: newsOpen.l, force: true }); renderNews(); } break;
-      case "listentldr": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
-      case "listenbrief": if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
-      case "listenstory": { const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
-      case "listenflash": { const xs = flashOrder().filter(x => !isFolded(x) && topNews(x).length); if (xs.length) listenNews(xs, "Flash"); else window.toast("No headlines to read yet"); break; }
-      case "listenstock": { const x = byS(v); if (!x || !topNews(x).length) break; const cur = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s; if (cur || (tts.on && tts.label === x.s + " news")) togglePause(); else listenNews([x], x.s + " news"); break; }
+      case "listentldr": { send("usage-listen", { kind: "summary" }); const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
+      case "listenbrief": send("usage-listen", { kind: "brief" }); if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
+      case "listenstory": { send("usage-listen", { kind: "story" }); const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
+      case "listenflash": { send("usage-listen", { kind: "flash" }); const xs = flashOrder().filter(x => !isFolded(x) && topNews(x).length); if (xs.length) listenNews(xs, "Flash"); else window.toast("No headlines to read yet"); break; }
+      case "listenstock": { send("usage-listen", { kind: "stock" }); const x = byS(v); if (!x || !topNews(x).length) break; const cur = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s; if (cur || (tts.on && tts.label === x.s + " news")) togglePause(); else listenNews([x], x.s + " news"); break; }
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
@@ -3351,6 +3438,15 @@ function clientApp() {
         send("startlog", {}, (ok, txt) => { pre.textContent = txt || "Nothing logged yet."; pre.hidden = false; t.textContent = "Hide"; });
         break;
       }
+      case "usage-yes": case "usage-no":
+        send("usage-consent", { on: act === "usage-yes" ? "1" : "0" }); S.usageAsk = false; renderUsageAsk();
+        window.toast(act === "usage-yes" ? "Thank you! Change it any time in Settings." : "No problem. Nothing is shared.");
+        break;
+      case "usage-test": {
+        const um = $("#usagemsg"); t.disabled = true; if (um) um.textContent = "Sending…";
+        send("usage-test", {}, (ok, msg) => { t.disabled = false; const m = $("#usagemsg"); if (m) m.textContent = (ok ? "✓ " : "✗ ") + msg; });
+        break;
+      }
       case "updcheck": { const m = $("#updmsg"); if (m) m.textContent = "Checking…"; send("updcheck", {}, (ok, msg) => { const mm = $("#updmsg"); if (mm) mm.textContent = msg; }); break; }
       case "openurl": send("openurl", { v }); break;
       case "aiopen": aiOpen = true; renderAI(); break;
@@ -3388,7 +3484,7 @@ function clientApp() {
   });
 
   applyLook();
-  renderAll();
+  renderAll(); renderUsageAsk();
 }
 
 const PALETTE_CSS = Object.entries(PALETTES).map(([k, p]) => `[data-theme=${k}]{--paper:${p.paper};--sheet:${p.sheet};--ink:${p.ink};--ink-2:${p.ink2};--muted:${p.muted};--rule:${p.rule};--signal:${p.signal};--signal-wash:${p.signalWash};--amber:${p.amber};--amber-wash:${p.amberWash};--danger:${p.danger};--up:${p.up};--down:${p.down};color-scheme:${p.scheme}}`).join("\n");
@@ -3633,6 +3729,11 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .manage{margin-top:10px}
 
 /* update sheet (app-blueprints · in-app-updates) */
+#usageask{background:var(--sheet);border:1px solid var(--rule);border-radius:18px;padding:14px 16px;margin:10px 14px 4px}
+#usageask b{font-size:calc(16px * var(--ts))}
+#usageask p{margin:6px 0 12px;color:var(--muted);font-size:calc(14px * var(--ts));line-height:1.4}
+.uabtns{display:flex;gap:10px}
+.uabtns button{flex:1;padding:10px}
 #upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
 /* AI invitation (app-blueprints · ai-invitation): above Settings and the AI sheet, below the update sheet and the launch screen */
 #aiinv{position:fixed;inset:0;z-index:47;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.45);animation:aiinvFade .25s ease both}
@@ -3973,6 +4074,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
     <button class="icon rf" data-act="refresh" aria-label="Refresh prices and news">${REFRESH_SVG}</button></div></div>
   <nav id="tabs" class="tabs" aria-label="Lists"></nav>
 </header>
+<div id="usageslot"></div>
 <main id="main"><div class="booting" role="status"><span class="busy-dot"></span>Loading your stocks…</div></main>
 <p class="ver">Stockit v${VERSION}</p>
 <div id="detail" class="sheet" aria-label="Stock"></div>
@@ -4350,6 +4452,7 @@ async function bootApp(isClosed) {
   let seen = "";
   try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight`, 5000); } catch (e) { seen = String(e.message || e); }
   startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
+  track("app_open", { layout: settings.density, theme: settings.theme, ai_key: !!aiKey(), privacy: !!settings.privacy });
   if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen Stockit.");
   else if (loadRepaired.length) toast("Some of your data couldn't be read, so Stockit kept a copy and started it fresh.");
   // Deferred work, once the first screen is drawn: prices and news, then updates, then the widget's icon.
@@ -4380,7 +4483,7 @@ async function main() {
   startLog("window on screen");
   await Promise.race([wv.loadHTML(buildHTML()), pause(15000)]);   // the launch screen, drawn on screen
   let closed = false;
-  presented.then(() => { closed = true; releaseLock(); });
+  presented.then(() => { closed = true; releaseLock(); flushUsage(); });
   bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
     startLog("start-up failed: " + (e.message || e));
     let log = "";

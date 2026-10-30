@@ -389,7 +389,9 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 
 ## Privacy and security
 
-- **Everything runs on your phone.** There is no Stockit server and nothing is collected.
+- **Anonymous usage, only if you agree.** A one-time question (and **Settings › Privacy › Share anonymous usage**) decides whether Stockit sends anonymous counts to PostHog's US cloud: app opens, how many stocks were added, briefings, stories and ideas made, portfolio checks, strategies saved and listening, the app version and a few display settings (including whether privacy mode is on). Each event carries a random install ID made on your phone, not linked to anything else. Never sent: tickers, company names, prices, amounts, positions, strategies or screenshots. Turning it off stops sending and deletes the install ID.
+
+- **Everything runs on your phone.** There is no Stockit server, and nothing is collected unless you agree to the anonymous usage counts below.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
 - **Your keys** (Claude, OpenAI and the optional Finnhub key) are stored in the iOS Keychain and only ever sent to the service they belong to.
 - **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), and your strategies, so it can talk about your money and your plans; for a portfolio check, the screenshots you choose; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
