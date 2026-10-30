@@ -4,6 +4,35 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.11.0",
+      "date": "2026-10-30",
+      "title": "Privacy for demos",
+      "highlights": [
+        {
+          "icon": "👁",
+          "title": "One tap to hide",
+          "text": "Tap the small eye by Updated to hide your amounts when you show Stockit to someone."
+        },
+        {
+          "icon": "••",
+          "title": "Your money, masked",
+          "text": "Portfolio value, gains, today's money, shares and average prices become ••••."
+        },
+        {
+          "icon": "📈",
+          "title": "Still a full demo",
+          "text": "Prices, percentages, charts, news and ideas stay visible, so everything still works."
+        }
+      ],
+      "changes": [
+        "A small eye button beside Updated, at the top left, turns privacy mode on and off; it turns blue while your amounts are hidden, and stays on until you tap it again",
+        "Hidden: portfolio value, today's and since-you-bought amounts, each position's shares, value, today and gain, average prices, Flash cards' shares and today's money, and the portfolio check's amounts (editing waits until privacy is off)",
+        "Amounts and share counts inside ✦ AI texts (briefing, stories) and in your strategies and their suggestions are masked too",
+        "With privacy on, the widget shows percentages only, even when Show portfolio value in the widget is on",
+        "Percentages, market prices, charts, headlines and ideas stay visible"
+      ]
+    },
+    {
       "version": "1.10.0",
       "date": "2026-10-30",
       "title": "Strategies, suggested and yours",

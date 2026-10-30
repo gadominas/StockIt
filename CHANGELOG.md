@@ -2,6 +2,20 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.11.0 (2026-10-30): Privacy for demos
+
+- 👁 **One tap to hide**: Tap the small eye by Updated to hide your amounts when you show Stockit to someone.
+- •• **Your money, masked**: Portfolio value, gains, today's money, shares and average prices become ••••.
+- 📈 **Still a full demo**: Prices, percentages, charts, news and ideas stay visible, so everything still works.
+
+**Changes**
+
+- A small eye button beside Updated, at the top left, turns privacy mode on and off; it turns blue while your amounts are hidden, and stays on until you tap it again
+- Hidden: portfolio value, today's and since-you-bought amounts, each position's shares, value, today and gain, average prices, Flash cards' shares and today's money, and the portfolio check's amounts (editing waits until privacy is off)
+- Amounts and share counts inside ✦ AI texts (briefing, stories) and in your strategies and their suggestions are masked too
+- With privacy on, the widget shows percentages only, even when Show portfolio value in the widget is on
+- Percentages, market prices, charts, headlines and ideas stay visible
+
 ## 1.10.0 (2026-10-30): Strategies, suggested and yours
 
 - ✦ **Suggested strategies**: Fresh plans for your portfolio and watchlist, drawn from your strategies and today's prices.
