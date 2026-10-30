@@ -2,6 +2,26 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.6.0 (2026-10-30): All your money, one currency
+
+- 💶 **One currency for everything**: Stocks from every market add up in euros, dollars or the currency you choose.
+- 🔁 **Today's rates**: Values, today's change and gains convert at the latest exchange rate, the currency's own move included.
+- 📲 **In the widget too**: With amounts on, the widget shows your portfolio in the same currency.
+
+**Changes**
+
+- Settings › Portfolio › Show your money in: Auto (the currency most of your money is in), EUR, USD, GBP, CHF, SEK, NOK, DKK, PLN, JPY, CAD, AUD or HKD
+- Portfolio value, today's change, gain since you bought and the split across holdings now add up every stock in that currency, instead of showing other currencies apart
+- Exchange rates load from Yahoo Finance with your prices (kept for 30 minutes); a new stock's currency loads when you add it, and changing the currency converts at once
+- Today's change in your currency includes the currency's move since yesterday; what you paid is converted at today's rate
+- A stock's page shows its value, today and gain in your currency, with its own currency underneath; London prices in pence are converted too
+- Rows and Flash cards show values and today's profit in your currency; sorting by value uses it
+- The briefing and the widget use the same total
+
+**Fixes**
+
+- Changes in money show two decimals, even when they're under one unit
+
 ## 1.5.0 (2026-10-30): Your markets, your plans
 
 - 👆 **Charts you can touch**: New 1D and 1W charts; touch or drag any chart to see the price at that moment.
