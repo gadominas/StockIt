@@ -2,6 +2,27 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.5.0 (2026-10-30): Your markets, your plans
+
+- 👆 **Charts you can touch**: New 1D and 1W charts; touch or drag any chart to see the price at that moment.
+- 🕒 **Markets open or closed**: Every stock shows if its market is open, and a Markets tab counts down to each open and close.
+- 🧭 **My strategies**: Add your own plans in Ideas; ✦ ideas, the briefing and stories follow them. Retire them when done.
+
+**Changes**
+
+- Stock charts: new 1D (from yesterday's close) and 1W ranges beside 1M, 6M, 1Y and 5Y; a day and a week are at most five minutes old
+- Touch or drag across any chart to see the price, the time or date and the change at that moment; it stays a moment after you let go
+- Each stock shows whether its market is open now (Portfolio, Watchlist, Flash), and its page says when it closes or opens, in your time
+- New Markets tab: the markets where your stocks trade first, then 16 others, each open or closed (or on lunch break) with a countdown to the next open or close, local and your-time hours, and the trading day's progress
+- Holidays: for markets where you hold stocks, Yahoo's own session times are used on top of the regular hours
+- Ideas › My strategies: write your own plans with an optional timing, see them all, retire them (and bring them back or delete them)
+- ✦ Ideas serve your active strategies, say which strategy each idea is for, and add a short Where it stands for every strategy; the briefing and stock stories take your strategies into account too
+- The Ideas tab shows without an AI key, for your strategies
+
+**Fixes**
+
+- All five tabs fit on one line
+
 ## 1.4.1 (2026-10-30): Opens every time
 
 - ⚡ **No more blank screen**: Opening Stockit from the widget shows the app at once; your stocks load behind it.
