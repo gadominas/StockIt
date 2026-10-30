@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.11.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.12.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -162,6 +162,10 @@ Is Stockit still in step with your real portfolio? Tap the **✓ shield icon** o
    - **+ Not in Stockit**: **Add to portfolio** with the shares and average price shown, or **Find it** if Yahoo doesn't know the name.
    - **− Not on your screenshots**: **Remove**, **Move to watchlist** or **Keep**, in case you sold it.
    - **Owned, on your watchlist**: **Move to portfolio**.
+
+**Banks that show only totals work too.** Many banking apps show each position's price and its total value (often in euros), with the gain, but not the number of shares. Stockit then works out the shares as value ÷ price, and the average price as (value − gain) ÷ shares when everything is in the stock's own currency. A **Position value** line compares your broker's value with Stockit's. For a foreign stock valued in euros the shares go through today's rate and are marked approximate, and the average price is left alone, because banks count the gain at the exchange rates of the day you bought. Positions that show only a price are marked **✓ Price checked**. Cash accounts and account numbers on a screenshot are ignored.
+
+<p align="center"><img src="docs/screenshots/33-check-value.png" width="250" alt="A bank screenshot without shares: 480 shares worked out from the position's value against 440 in Stockit, and NVDA matching through its euro value"></p>
 
 **Nothing changes on its own.** Each suggestion waits for your tap and is marked once handled. Tolerances (1% for average prices and 5% for prices by default) and the number of screenshots are in **Settings › Portfolio check**.
 

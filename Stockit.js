@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1186,6 +1186,21 @@ function matchPosition(p, pool2) {
   }
   return x || null;
 }
+// What a position's total value (and gain) on the broker's screenshot says about its shares and average price,
+// for brokers and banks that show only the price and the position's value. Value in another currency than the
+// price (a USD stock valued in EUR) goes through today's rate, so its share count is approximate.
+function fromValue(p, cur, yahooPrice) {
+  const vc = p.valueCurrency || p.currency || cur, px = convertCur(p.price, p.currency || cur, cur) || yahooPrice;
+  const val = convertCur(p.value, vc, cur);
+  if (val == null || !px) return {};
+  const same = normCur(vc)[0] === normCur(cur)[0], raw = val / px, near = Math.round(raw), tol = same ? 0.005 : 0.02;
+  const sh = near > 0 && Math.abs(raw - near) / raw < tol ? near : round(raw, 2);
+  const gc = p.gainCurrency || vc;
+  // Average price from the gain only when value, gain and stock share one currency: brokers count a foreign
+  // stock's gain at the exchange rates of the day you bought, which Stockit doesn't know.
+  const cost = p.gain != null && same && normCur(gc)[0] === normCur(cur)[0] && sh > 0 ? (p.value - p.gain) / sh * (convertCur(1, vc, cur) || 1) : null;
+  return { sh, raw, exact: sh === near, cost, same, vc, tol };
+}
 async function runCheck() {
   if (checkBusy) return;
   if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
@@ -1198,10 +1213,11 @@ async function runCheck() {
     prog(0.08, "Reading your screenshots with ✦ AI…");
     const o = parseJSON(await aiCall("You read brokerage and portfolio screenshots precisely, digit by digit. Reply with JSON only.",
       `These ${shots.length} screenshot${shots.length === 1 ? "" : "s"} show one investment portfolio, possibly scrolled across several screens: list each position once, even if it appears twice.
-For every position give exactly what is shown: the ticker if shown (else null), the name as shown, the ISIN if shown, the number of shares or units, the average purchase price per share, the current price per share, the current market value, and the currency of those prices.
+For every position give exactly what is shown: the ticker if shown (else null), the name as shown, the ISIN if shown, the number of shares or units, the average purchase price per share, the current price per share and its currency, the position's total market value and its currency (often different from the price's, e.g. a USD price with a EUR value), and the unrealised gain or loss shown for the position (an amount, negative when down, with its currency, and the percentage).
+Cash and bank accounts are not positions. Ignore account numbers (IBANs), names and other personal identifiers; never include them.
 Use null for anything not shown. Never calculate or guess a number that isn't on screen. Read decimal commas correctly (1.234,56 is one thousand two hundred thirty-four point fifty-six).
 Also give the broker or app name and the portfolio total if they are shown.
-JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"NVDA","name":"NVIDIA Corp","isin":null,"shares":30,"avgPrice":96.0,"price":143.61,"value":4308.3,"currency":"USD"}]}`,
+JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"NVDA","name":"NVIDIA Corp","isin":null,"shares":30,"avgPrice":96.0,"price":143.61,"currency":"USD","value":3964.1,"valueCurrency":"EUR","gain":713.44,"gainCurrency":"EUR","gainPct":12.27}]}`,
       3000, "check", settings.aiProvider, shots));
     const num2 = v => {   // numbers as shown: 1,234.56 and 1.234,56 both read right
       if (v == null || v === "") return null;
@@ -1213,10 +1229,11 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
       const k = parseFloat(t); return isFinite(k) ? k : null;
     };
     const pos = (Array.isArray(o.positions) ? o.positions : []).map(p => ({ symbol: p.symbol ? String(p.symbol).trim() : "", name: String(p.name || "").trim(), isin: p.isin || "",
-      shares: num2(p.shares), avgPrice: num2(p.avgPrice), price: num2(p.price), value: num2(p.value), currency: p.currency ? String(p.currency).trim() : "" })).filter(p => p.symbol || p.name);
+      shares: num2(p.shares), avgPrice: num2(p.avgPrice), price: num2(p.price), value: num2(p.value), currency: p.currency ? String(p.currency).trim() : "",
+      valueCurrency: p.valueCurrency ? String(p.valueCurrency).trim() : "", gain: num2(p.gain), gainCurrency: p.gainCurrency ? String(p.gainCurrency).trim() : "", gainPct: num2(p.gainPct) })).filter(p => p.symbol || p.name);
     if (!pos.length) { toast("No positions found in those screenshots"); return; }
     prog(0.62, `Read ${pos.length} position${pos.length === 1 ? "" : "s"}. Comparing with Stockit…`);
-    for (const c of new Set(pos.map(p => p.currency).filter(Boolean))) await ensureRate(c);
+    for (const c of new Set(pos.flatMap(p => [p.currency, p.valueCurrency, p.gainCurrency]).filter(Boolean))) await ensureRate(c);
     const items = [], used = new Set(), pTol = cfg("checkPriceTol"), cTol = cfg("checkCostTol");
     let n = 0;
     for (const p of pos) {
@@ -1228,22 +1245,27 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
         const m = market[x.s] || {}, cur = m.cur || p.currency || "USD", pc = p.currency || cur;
         const shotPrice = convertCur(p.price, pc, cur), shotCost = convertCur(p.avgPrice, pc, cur);
         const gap = shotPrice != null && m.price ? (shotPrice / m.price - 1) * 100 : null;
+        const dv = fromValue(p, cur, m.price), sh = p.shares != null ? p.shares : dv.sh, cost = shotCost != null ? shotCost : dv.cost;
         const diffs = [];
         if (x.list !== "own") diffs.push("watch");
-        if (p.shares != null && Math.abs(p.shares - (x.sh || 0)) > 1e-6) diffs.push("shares");
-        if (shotCost != null && (!x.cost || Math.abs(shotCost / x.cost - 1) * 100 > cTol)) diffs.push("cost");
+        if (sh != null && Math.abs(sh - (x.sh || 0)) / Math.max(sh, x.sh || 0, 1e-9) > (p.shares != null ? 1e-6 : dv.tol)) diffs.push("shares");
+        if (cost != null && (!x.cost || Math.abs(cost / x.cost - 1) * 100 > cTol)) diffs.push("cost");
         if (gap != null && Math.abs(gap) > pTol) diffs.push("price");
+        if (p.shares != null && dv.sh != null && Math.abs(dv.raw / p.shares - 1) > 0.02) diffs.push("value");   // shares and value disagree: likely misread
+        const mineValue = convertCur((x.sh || 0) * (shotPrice || m.price || 0), cur, dv.vc || cur);
         items.push({ id, kind: x.list !== "own" ? "watch" : diffs.length ? "differs" : "match", s: x.s, name: m.name || x.name || x.s, cur, shot: p, shotCur: pc,
-          mine: { sh: x.sh || 0, cost: x.cost || 0, price: m.price != null ? m.price : null }, diffs, gap,
-          suggest: { sh: p.shares != null ? p.shares : x.sh || 0, cost: shotCost != null ? round(shotCost, shotCost < 10 ? 4 : 2) : x.cost || 0 }, converted: normCur(pc)[0] !== normCur(cur)[0] });
+          mine: { sh: x.sh || 0, cost: x.cost || 0, price: m.price != null ? m.price : null, value: mineValue }, diffs, gap, dv,
+          partial: sh == null && cost == null,   // only the price could be compared
+          suggest: { sh: sh != null ? sh : x.sh || 0, cost: cost != null ? round(cost, cost < 10 ? 4 : 2) : x.cost || 0 }, converted: normCur(pc)[0] !== normCur(cur)[0] });
       } else {
         const r = await resolveSymbol(p.symbol || p.name).catch(() => null);
         let cur = p.currency || "USD", price = null;
         if (r) { try { const { meta, pts } = await yChart(r.s, "5d", "1d"); cur = meta.currency || cur; price = priceFrom(meta, pts).price; } catch (e) {} }
         const shotPrice = convertCur(p.price, p.currency || cur, cur), shotCost = convertCur(p.avgPrice, p.currency || cur, cur);
         const gap = shotPrice != null && price ? (shotPrice / price - 1) * 100 : null;
-        items.push({ id, kind: "missing", s: r ? r.s : null, name: (r && r.name) || p.name || p.symbol, cur, shot: p, shotCur: p.currency || cur, yahooPrice: price, gap,
-          diffs: gap != null && Math.abs(gap) > pTol ? ["price"] : [], suggest: { sh: p.shares || 0, cost: shotCost != null ? round(shotCost, shotCost < 10 ? 4 : 2) : 0 }, converted: !!p.currency && normCur(p.currency)[0] !== normCur(cur)[0] });
+        const dv = fromValue(p, cur, price);
+        items.push({ id, kind: "missing", dv, s: r ? r.s : null, name: (r && r.name) || p.name || p.symbol, cur, shot: p, shotCur: p.currency || cur, yahooPrice: price, gap,
+          diffs: gap != null && Math.abs(gap) > pTol ? ["price"] : [], suggest: { sh: p.shares || dv.sh || 0, cost: shotCost != null ? round(shotCost, shotCost < 10 ? 4 : 2) : dv.cost != null ? round(dv.cost, dv.cost < 10 ? 4 : 2) : 0 }, converted: !!p.currency && normCur(p.currency)[0] !== normCur(cur)[0] });
       }
     }
     for (const x of stocks.filter(y => y.list === "own" && !used.has(y.s)))
@@ -2932,13 +2954,14 @@ function clientApp() {
   // ---- Check my portfolio: screenshots of your broker's app, compared with Stockit; you apply each change ----
   const CK = {   // what each result means, with its badge
     match: ["ok", "✓ Matches", "Shares and average price match your broker."],
+    partial: ["ok", "✓ Price checked", "Your screenshot shows neither shares nor the position's value, so only the price could be compared."],
     differs: ["warn", "≠ Different", ""],
     price: ["bad", "⚠ Price doesn't match", "The price on your screenshot is far from today's. If the screenshot is recent, Stockit may hold the wrong shares or average price for it, or a different listing of the same company."],
     watch: ["warn", "Owned, on your watchlist", "Your screenshot shows you own it, but in Stockit it's on your watchlist."],
     missing: ["add", "+ Not in Stockit", "On your broker's screenshot, but not in your Stockit portfolio."],
     extra: ["gone", "− Not on your screenshots", "In your Stockit portfolio, but not on your screenshots. If they show your whole portfolio, you may have sold it."],
   };
-  const ckStatus = it => it.kind === "differs" && it.diffs.includes("price") && it.diffs.length === 1 ? "price" : it.kind;
+  const ckStatus = it => it.kind === "differs" && it.diffs.includes("price") && it.diffs.length === 1 ? "price" : it.kind === "match" && it.partial ? "partial" : it.kind;
   function renderCheck() {
     const el = $("#checksheet"), keep = el.scrollTop;
     el.classList.toggle("open", checkOpen); lockBody();
@@ -2961,7 +2984,7 @@ function clientApp() {
       el.scrollTop = keep; return;
     }
     // 3. the results, all open: problems first, then what matches
-    const order = { price: 0, differs: 1, watch: 2, missing: 3, extra: 4, match: 5 };
+    const order = { price: 0, differs: 1, watch: 2, missing: 3, extra: 4, match: 5, partial: 6 };
     const items = C.items.slice().sort((a, b) => (!!a.resolved - !!b.resolved) || order[ckStatus(a)] - order[ckStatus(b)]);
     const count = k => C.items.filter(i => ckStatus(i) === k).length, todo = C.items.filter(i => i.kind !== "match" && !i.resolved).length;
     const m2 = (v, c2) => v == null ? "—" : money(v, c2);
@@ -2969,19 +2992,20 @@ function clientApp() {
     const fld = (...a) => priv() ? `<p class="note">Turn off privacy (the eye at the top) to see and edit amounts.</p>` : fldReal(...a);
     const nsh = v => priv() ? "••••" : nf(v, v % 1 ? 4 : 0);
     const cmp = it => {
-      const yh = it.kind === "missing", m2 = (v, c2) => v == null ? "—" : priv() ? "••••" : money(v, c2);
+      const yh = it.kind === "missing", dv = it.dv || {}, m2 = (v, c2) => v == null ? "—" : priv() ? "••••" : money(v, c2);
       const row = (label, a, b, bad) => `<div class="ck-r ${bad ? "bad" : ""}"><span>${label}</span><b>${a}</b><b>${b}</b><i>${bad ? "≠" : a !== "—" && b !== "—" ? "✓" : ""}</i></div>`;
       if (it.kind === "extra") return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>Stockit</span><span>Broker</span><i></i></div>${row("Shares", nsh(it.mine.sh), "not shown", true)}${row("Price now", m2(it.mine.price, it.cur), "—", false)}</div>`;
       return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>${yh ? "Yahoo" : "Stockit"}</span><span>Broker</span><i></i></div>
-        ${row("Shares", it.mine ? nsh(it.mine.sh) : "—", it.shot && it.shot.shares != null ? nsh(it.shot.shares) : "—", it.diffs.includes("shares") || yh)}
-        ${row("Average price", it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—", it.shot ? m2(it.shot.avgPrice, it.shotCur) : "—", it.diffs.includes("cost") || yh)}
+        ${row("Shares", it.mine ? nsh(it.mine.sh) : "—", it.shot && it.shot.shares != null ? nsh(it.shot.shares) : dv.sh != null ? `${dv.exact ? "" : "≈ "}${nsh(dv.sh)} <small class="muted">from value</small>` : "—", it.diffs.includes("shares") || yh)}
+        ${row("Average price", it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—", it.shot && it.shot.avgPrice != null ? m2(it.shot.avgPrice, it.shotCur) : dv.cost != null ? `${m2(dv.cost, it.cur)} <small class="muted">from gain</small>` : "—", it.diffs.includes("cost") || yh)}
+        ${it.shot && it.shot.value != null ? row("Position value", it.mine && it.mine.value != null && !yh ? m2(it.mine.value, dv.vc || it.cur) : "—", m2(it.shot.value, it.shot.valueCurrency || it.shotCur) + (it.shot.gain != null ? ` <small class="${it.shot.gain >= 0 ? "up" : "down"}">${it.shot.gain >= 0 ? "+" : "−"}${priv() ? "••••" : nf(Math.abs(it.shot.gain), 2)}${it.shot.gainPct != null ? " (" + pct(it.shot.gainPct, 2) + ")" : ""}</small>` : ""), it.diffs.includes("shares") || it.diffs.includes("value")) : ""}
         ${row("Price now", m2(it.mine ? it.mine.price : it.yahooPrice, it.cur), (it.shot ? m2(it.shot.price, it.shotCur) : "—") + (it.gap != null ? ` <small class="${it.diffs.includes("price") ? "down" : "muted"}">${pct(it.gap, 1)}</small>` : ""), it.diffs.includes("price"))}</div>`;
     };
     const card = it => {
       const st = ckStatus(it), [tone, label, why] = CK[st];
-      const whyTxt = st === "differs" ? `Your broker shows a different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "number of shares", cost: "average price", price: "price" }[d])).join(" and ")}.` + (it.diffs.includes("price") ? " " + CK.price[2] : "") : why;
+      const whyTxt = st === "differs" ? `Your broker shows a different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "number of shares", cost: "average price", price: "price", value: "position value" }[d])).join(" and ")}.` + (it.diffs.includes("price") ? " " + CK.price[2] : "") : why;
       const fields = it.suggest ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Average price converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}` : "";
-      const acts = it.resolved || st === "match" ? "" : st === "missing" ? (it.s
+      const acts = it.resolved || st === "match" || st === "partial" ? "" : st === "missing" ? (it.s
           ? `${fields}<div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="add">Add to portfolio</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`
           : `<div class="aic-btns"><button class="sm primary" data-act="checkfind" data-v="${esc(it.shot.symbol || it.name)}">Find it</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`)
         : st === "extra" ? `<div class="aic-btns"><button class="sm danger ${ckArmed === it.id ? "armed" : ""}" data-act="checkapply" data-v="${it.id}" data-k="remove">${ckArmed === it.id ? "Confirm" : "Remove"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="watch">Move to watchlist</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep</button></div>`
@@ -2989,13 +3013,13 @@ function clientApp() {
       return `<article class="ck t-${tone} ${it.resolved ? "done" : ""}" id="ck-${it.id}"><div class="ck-h"><div class="r-l"><b class="sym">${esc(it.s || it.shot.symbol || "?")}</b><small>${esc(it.name || "")}</small></div>
           <span class="ck-b b-${tone}">${it.resolved ? "✓ " + esc(it.resolved) : label}</span></div>
         ${it.resolved || st === "match" ? "" : `<p class="ck-what">${whyTxt}${it.kind === "missing" && !it.s ? " Stockit couldn't find it on Yahoo Finance." : ""}</p>`}
-        ${cmp(it)}${acts}</article>`;
+        ${cmp(it)}${it.dv && it.dv.sh != null && it.shot && it.shot.shares == null && !it.resolved ? `<p class="note">Shares worked out from the position's value ÷ its price${it.dv.same ? "" : `, through today's ${esc(it.dv.vc)} rate, so they're approximate`}.${it.dv.cost != null && it.shot.avgPrice == null ? " Average price from the value minus the gain." : !it.dv.same && it.shot.gain != null ? " The average price can't be worked out: your broker counts the gain at the exchange rates of the day you bought." : ""}</p>` : ""}${it.diffs.includes("value") ? `<p class="note">The shares and position value read from your screenshot don't add up; check them before you apply.</p>` : ""}${acts}</article>`;
     };
     const chip = (k, n) => n ? `<span class="ck-b b-${CK[k][0]}">${CK[k][1]} <b>${n}</b></span>` : "";
     el.innerHTML = head + `<div class="sh-body">
       <section class="sum ck-res"><span class="sum-k">Checked ${C.n} position${C.n === 1 ? "" : "s"}${C.broker ? " from " + esc(C.broker) : ""}</span>
         <div class="sum-v ${todo ? "" : "up"}">${todo ? `${todo} to review` : "All in step ✓"}</div>
-        <div class="ck-chips">${["match", "differs", "price", "watch", "missing", "extra"].map(k => chip(k, count(k))).join("")}</div>
+        <div class="ck-chips">${["match", "partial", "differs", "price", "watch", "missing", "extra"].map(k => chip(k, count(k))).join("")}</div>
         ${C.total != null ? `<p class="ck-tot">Broker's total ${P(money(C.total, C.totalCur || (C.mineTotal || {}).cur))}${C.mineTotal ? ` · Stockit ${P(money(C.mineTotal.v, C.mineTotal.cur))}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : ""}
         <p class="note">Read by ✦ ${PN[C.by] || esc(C.by)} ${rel(C.at)} from ${C.shots} screenshot${C.shots === 1 ? "" : "s"}. AI can misread a screenshot, so check a suggestion before you apply it.</p></section>
       ${(C.thumbs || []).length ? thumbs(C.thumbs, false) : ""}
