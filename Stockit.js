@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.13.3';
+const VERSION = '1.14.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -245,7 +245,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true, privacy: false,   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1495,7 +1495,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1606,7 +1606,7 @@ async function handle(m) {
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
-      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy",
+      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -1814,6 +1814,7 @@ function clientApp() {
   let introState = null;   // "big" on the first launches, then "shrunk" a few seconds later
   let stratEditing = null; const stratEdit = { text: "", when: "" }, sgEdit = {};
   let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
+  let briefFold = null;   // null: as remembered (folded once you've moved on from this briefing)
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
   const $ = s => document.querySelector(s);
@@ -2275,13 +2276,21 @@ function clientApp() {
     return head + `<div class="listbar"><span>${items.length} ${tab === "own" ? "owned" : "watching"}</span><div class="seg">${sorts.map(([v, l]) => `<button class="${cur === v ? "on" : ""}" data-act="sort" data-v="${v}">${l}</button>`).join("")}</div></div>
       <div class="rows">${sortRows(items).map(row).join("")}</div>`;
   }
+  // What you put into a position and what it has made or lost, in your currency (the price paid at today's rate).
+  function investedLine(x) {
+    if (x.list !== "own" || !x.sh || !x.cost || x.price == null) return "";
+    const inv = inHome(x.sh * x.cost, x.cur), val = posHome(x), cur = inv != null && val != null ? HOME() : x.cur;
+    const i2 = inv != null && val != null ? inv : x.sh * x.cost, g = (inv != null && val != null ? val : x.sh * x.price) - i2;
+    const sg = v => (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, Math.abs(v) >= 10000, Math.abs(v) >= 10000 ? null : 0);
+    return `<small class="r-pl">Invested ${P(money(i2, cur, true))} · <span class="${cls(g)}">${P(sg(g))} (${pct(g / i2 * 100, 1)})</span></small>`;
+  }
   function row(x) {
     const d = dayPct(x), c = cls(d);
     const ph = posHome(x), sub = x.list === "own" && x.sh && x.price != null ? (priv() ? `${P("")} shares · ${P("")}` : `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${ph != null ? money(ph, HOME(), true) : money(x.sh * x.price, x.cur, true)}`) : esc(x.name);
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
     return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
-      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${mkBadge(x)}</div>
+      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${investedLine(x)}${mkBadge(x)}</div>
       ${spark((x.pts || []).slice(-23), c)}
       <div class="r-r"><b>${money(x.price, x.cur)}</b><span class="pill ${c}">${pct(d)}</span></div>${sig}</div>`;
   }
@@ -2323,10 +2332,15 @@ function clientApp() {
       <p class="brief-p muted">What moved and why, in plain words, with a buy, hold or sell view for each stock.</p>
       <div class="aic-btns"><button class="primary" data-act="briefing" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Write today's briefing"}</button></div></section>`;
     const ps = paras(b.story);
+    const folded = briefFold != null ? briefFold : S.settings.briefSeen === b.at;
     const n = { buy: 0, hold: 0, sell: 0 };
     S.stocks.forEach(x => { if (x.sig && n[x.sig.signal] != null) n[x.sig.signal]++; });
+    if (folded) return `<section class="brief folded mood-${esc(b.mood)}">
+      <button class="brief-h brief-fold" data-act="brieffold" aria-expanded="false"><span class="badge-ai">✦ AI briefing by ${PN[b.by] || esc(b.by)}</span><span class="note">${rel(b.at)}</span><span class="chev" aria-hidden="true">›</span></button>
+      <button class="brief-t brief-tt" data-act="brieffold">${esc(mask(b.headline))}</button>
+      <div class="sigcount">${["buy", "hold", "sell"].filter(k => n[k]).map(k => `<span class="chip sig-${k}">${n[k]} ${k}</span>`).join("")}</div></section>`;
     return `<section class="brief mood-${esc(b.mood)}">
-      <div class="brief-h"><span class="badge-ai">✦ AI briefing by ${PN[b.by] || esc(b.by)}</span><span class="note">${rel(b.at)}</span></div>
+      <button class="brief-h brief-fold" data-act="brieffold" aria-expanded="${folded ? "false" : "true"}"><span class="badge-ai">✦ AI briefing by ${PN[b.by] || esc(b.by)}</span><span class="note">${rel(b.at)}</span><span class="chev" aria-hidden="true">›</span></button>
       <h2 class="brief-t">${esc(mask(b.headline))}</h2>
       <div class="brief-s">${(briefFull ? ps : ps.slice(0, 1)).join("")}</div>
       ${ps.length > 1 ? `<button class="link small" data-act="brieffull">${briefFull ? "Show less" : "Read the full briefing"}</button>` : ""}
@@ -3190,7 +3204,7 @@ function clientApp() {
     if (!t || t.disabled) return;
     const act = t.dataset.act, v = t.dataset.v;
     switch (act) {
-      case "tab": tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
+      case "tab": if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "refresh": if (!progress) send("refresh", { force: true }); break;
       case "newsopen": openNews(t.dataset.s, v); break;
@@ -3275,6 +3289,12 @@ function clientApp() {
       case "story": busyK.add("story:" + v); renderDetail(); send("story", { s: v }); break;
       case "briefing": busyK.add("briefing"); render(); send("briefing", {}); break;
       case "brieffull": briefFull = !briefFull; render(); break;
+      case "brieffold": {
+        const b = S.briefing; if (!b) break;
+        const was = briefFold != null ? briefFold : S.settings.briefSeen === b.at;
+        briefFold = !was; if (briefFold) { briefFull = false; S.settings.briefSeen = b.at; send("set", { k: "briefSeen", v: b.at }); }
+        render(); break;
+      }
       case "share-brief": if (S.briefing) send("share", { text: shareText(S.briefing.headline, S.briefing.by, S.briefing.story) }); break;
       case "share-story": { const x = byS(v); if (x && x.story) send("share", { text: shareText(`${x.s}: ${x.story.headline}`, x.story.by, x.story.story) }); break; }
       case "ideas": busyK.add("ideas"); render(); send("ideas", {}); break;
@@ -3834,6 +3854,15 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .idea-open .chev{color:var(--signal);font-weight:700}
 .idea-t{margin-top:10px}
 .idea .rangebox{margin-top:8px}
+.brief-fold{display:flex;align-items:center;gap:8px;width:100%;text-align:left}
+.brief-fold .note{flex:1;text-align:right}
+.brief-fold .chev{font-size:20px;line-height:1;color:var(--muted);transform:rotate(90deg);transition:transform .2s}
+.brief.folded .brief-fold .chev{transform:none}
+.brief.folded{padding-bottom:12px}
+.brief-tt{display:block;width:100%;text-align:left;margin-top:6px}
+.brief.folded .sigcount{margin-top:8px}
+.r-l .r-pl{display:block;font-size:calc(12.5px * var(--ts));color:var(--muted);margin-top:1px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+.r-pl .up,.r-pl .down{font-weight:700}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
