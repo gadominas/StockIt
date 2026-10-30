@@ -4,6 +4,32 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.13.2",
+      "date": "2026-10-30",
+      "title": "AI, from the start",
+      "highlights": [
+        {
+          "icon": "✦",
+          "title": "From the first launch",
+          "text": "Without a key, the AI invitation now shows the first time you open Stockit."
+        },
+        {
+          "icon": "🔑",
+          "title": "One tap to set it up",
+          "text": "Turn on AI opens AI settings with Add key highlighted."
+        },
+        {
+          "icon": "🤫",
+          "title": "Still never pushy",
+          "text": "Later waits a few days, and Don't remind me again ends it for good."
+        }
+      ],
+      "changes": [
+        "AI invitation 1.2.0: no first-day wait; it can show on the first launch, right after installing"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.13.1",
       "date": "2026-10-30",
       "title": "No key, no AI",

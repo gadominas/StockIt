@@ -2,6 +2,16 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.13.2 (2026-10-30): AI, from the start
+
+- ✦ **From the first launch**: Without a key, the AI invitation now shows the first time you open Stockit.
+- 🔑 **One tap to set it up**: Turn on AI opens AI settings with Add key highlighted.
+- 🤫 **Still never pushy**: Later waits a few days, and Don't remind me again ends it for good.
+
+**Changes**
+
+- AI invitation 1.2.0: no first-day wait; it can show on the first launch, right after installing
+
 ## 1.13.1 (2026-10-30): No key, no AI
 
 - 🔑 **The key decides**: Without a key AI is off, so the invitation can show again, even if you had a key before.
