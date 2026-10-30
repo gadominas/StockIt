@@ -10,6 +10,9 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Charts from one day to five years; touch to see the price at any moment
+ *  - Whether each stock's market is open now, and a Markets tab with every market's opening and closing countdown
+ *  - My strategies: your own plans in Ideas, kept or retired, and taken into account by ✦ ideas, briefing and stories
  *  - Listen to a stock's news: its top articles are read in full and told as one ✦ AI story (or their key sentences without AI)
  *  - Read aloud, as in BlogPulse: the briefing, stories, TL;DRs and Flash, with iPhone voices or ✦ OpenAI voices
  *  - Optional Claude or OpenAI: a portfolio briefing, a story and a buy / hold / sell view per stock, and new ideas
@@ -22,7 +25,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.4.1';
+const VERSION = '1.5.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -195,7 +198,7 @@ async function load(n, def, waitMs = 10000) {
 // Data files are only written once they were read, so a slow start can never save an empty list over them.
 let dataLoaded = false;
 const write = (n, v) => {
-  if (n === "settings" ? !settingsOk : (["stocks", "market", "insights", "tldrs", "usage"].includes(n) && !dataLoaded)) return;
+  if (n === "settings" ? !settingsOk : (["stocks", "market", "insights", "tldrs", "usage", "strategies"].includes(n) && !dataLoaded)) return;
   fm.writeString(P(n), JSON.stringify(v));
 };
 
@@ -220,6 +223,7 @@ let stocks = [];        // [{ s, name, exch, list: "own" | "watch", sh, cost, ad
 let market = {};        // per symbol: price, prev, pts, f (fundamentals), prof, news, crowd
 let insights = { briefing: null, stories: {}, ideas: null };   // AI output, with provider and time
 let tldrs = {};         // TL;DRs and news stories by headline link, newest 150 kept
+let strategies = [];    // the investor's own plans: [{ id, text, when, status: "active" | "retired", at, retiredAt }]
 async function loadData() {
   loadIssues.length = 0;
   stocks = await load("stocks", []);
@@ -227,6 +231,7 @@ async function loadData() {
   insights = await load("insights", { briefing: null, stories: {}, ideas: null });
   insights.stories = insights.stories || {};
   tldrs = await load("tldrs", {});
+  strategies = await load("strategies", []);
   usage = await load("usage", usage);
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
@@ -249,7 +254,7 @@ const getJSON = async (url, headers, timeout) => JSON.parse(await getText(url, h
 const secretFor = id => Keychain.contains(SECRETS[id].key) ? Keychain.get(SECRETS[id].key) : null;
 
 // ---------- Yahoo Finance: prices and history (no sign-in) ----------
-async function yChart(sym, range = "1y", interval = "1d") {
+async function yChart(sym, range = "1y", interval = "1d", keepTime = false) {   // keepTime: points in seconds (intraday), else days
   const q = `/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false`;
   let j;
   try { j = await getJSON("https://query1.finance.yahoo.com" + q); }
@@ -258,9 +263,12 @@ async function yChart(sym, range = "1y", interval = "1d") {
   if (!r || !r.meta) throw new Error((j && j.chart && j.chart.error && j.chart.error.description) || "No data for " + sym);
   const close = ((r.indicators && r.indicators.quote) || [{}])[0].close || [];
   const pts = [];
-  (r.timestamp || []).forEach((t, i) => { if (close[i] != null) pts.push([Math.floor(t / 86400), round(close[i], 4)]); });
+  (r.timestamp || []).forEach((t, i) => { if (close[i] != null) pts.push([keepTime ? t : Math.floor(t / 86400), round(close[i], 4)]); });
   return { meta: r.meta, pts };
 }
+
+// Today's (or the next) regular session from Yahoo, which knows the exchange's holidays.
+const tradingPeriod = meta => { const r = meta && meta.currentTradingPeriod && meta.currentTradingPeriod.regular; return r && r.start && r.end ? { start: r.start * 1000, end: r.end * 1000 } : null; };
 
 // The latest price and the close before today's session, from a chart answer.
 function priceFrom(meta, pts) {
@@ -281,7 +289,7 @@ async function loadPrices(sym) {
     price, prev, cur: meta.currency || m.cur, name: meta.longName || meta.shortName || m.name,
     exch: meta.fullExchangeName || meta.exchangeName || m.exch, type: meta.instrumentType || m.type,
     hi52: num(meta.fiftyTwoWeekHigh), lo52: num(meta.fiftyTwoWeekLow), mt: (meta.regularMarketTime || 0) * 1000,
-    pts, at: Date.now(), err: null,
+    pts, at: Date.now(), err: null, tz: meta.exchangeTimezoneName || m.tz, tp: tradingPeriod(meta) || m.tp || null,
   });
   const x = stocks.find(s => s.s === sym);
   if (x && m.name && (!x.name || x.name === sym)) x.name = m.name;
@@ -291,7 +299,7 @@ async function loadPrices(sym) {
 async function quickPrice(sym) {
   const { meta, pts } = await yChart(sym, "5d", "1d");
   const m = market[sym] = market[sym] || {};
-  Object.assign(m, priceFrom(meta, pts), { mt: (meta.regularMarketTime || 0) * 1000 });
+  Object.assign(m, priceFrom(meta, pts), { mt: (meta.regularMarketTime || 0) * 1000, tp: tradingPeriod(meta) || m.tp || null });
 }
 
 // ---------- Yahoo Finance: company numbers (needs a session cookie and crumb) ----------
@@ -670,6 +678,17 @@ function stockFacts(x, nNews, tot) {
   ].filter(Boolean).join("\n");
 }
 
+// The investor's own strategies (Ideas › My strategies), for every prompt that gives advice.
+function planLine() {
+  const act = strategies.filter(g => g.status !== "retired");
+  if (!act.length) return "";
+  return "\nThe investor's own strategies, to take into account (they decide; you help):\n" + act.map(g => `- [${g.id}] ${g.text}${g.when ? " (timing: " + g.when + ")" : ""} — set ${dateS(g.at)}`).join("\n");
+}
+function positionsLine() {
+  const own = stocks.filter(x => x.list === "own" && x.sh);
+  return own.length ? "\nPositions: " + own.map(x => { const m = market[x.s] || {}, g = x.cost && m.price ? (m.price / x.cost - 1) * 100 : null;
+    return `${x.s} ${x.sh} shares${x.cost ? ", average price " + fx(x.cost) : ""}${m.price != null ? ", now " + fx(m.price) : ""}${g != null ? " (" + sx(g) + " since bought)" : ""}`; }).join("; ") + "." : "";
+}
 const TONE = `You are Stockit, a calm, plain-spoken companion for a casual long-term investor who doesn't follow technical analysis.
 Write like a knowledgeable friend: short sentences, everyday words, and when a term like P/E matters, explain it in passing.
 Use only the numbers and headlines provided. If something isn't in them, say it isn't known rather than guessing; never invent figures, events or quotes.
@@ -697,7 +716,7 @@ async function runBriefing(force) {
   briefingBusy = true; call("onBusy", "briefing", true);
   try {
     const tot = totals();
-    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.
+    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.${planLine()}
 Portfolio: ${list.filter(x => x.list === "own").length} owned, ${list.filter(x => x.list !== "own").length} on the watchlist.${tot.length ? " Value: " + tot.map(t => `${t.value.toFixed(0)} ${t.cur} (today ${t.day >= 0 ? "+" : ""}${t.day.toFixed(0)})`).join(", ") + "." : ""}
 
 ${list.map(x => stockFacts(x, cfg("aiHeadlines"), tot)).join("\n\n")}
@@ -732,7 +751,7 @@ async function runStory(sym) {
   try {
     const m = market[sym] || {};
     if (!m.prof || Date.now() - m.prof.at > cfg("fundHours") * 3600e3) await loadProfile(sym).catch(() => {});
-    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.
+    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.${planLine()}
 ${m.prof && m.prof.about ? "What the company does: " + m.prof.about + "\n" : ""}
 ${stockFacts(x, Math.max(cfg("aiHeadlines"), 10), totals())}
 
@@ -769,18 +788,19 @@ async function runIdeas() {
       } catch (e) {}
     }
     const mine = new Set(stocks.map(x => x.s));
+    const nAct = strategies.filter(g => g.status !== "retired").length;
     const sectors = [...new Set(stocks.map(x => market[x.s] && market[x.s].prof && market[x.s].prof.sector).filter(Boolean))];
-    const n = cfg("ideasCount");
-    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.
+    const n = Math.min(10, cfg("ideasCount") + Math.min(3, nAct));   // a little room for ideas that serve your strategies
+    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.${planLine()}
 Themes this investor likes: ${cfg("ideaThemes").join("; ")}.
 Already owned: ${stocks.filter(x => x.list === "own").map(x => `${x.s} (${(market[x.s] || {}).name || x.name})`).join(", ") || "nothing yet"}.
 Watching: ${stocks.filter(x => x.list !== "own").map(x => x.s).join(", ") || "nothing"}.${sectors.length ? "\nSectors held: " + sectors.join(", ") + "." : ""}
 Candidates seen in the market today (you may pick from these or suggest well-known companies you know):
 ${[...cand].filter(([s]) => !mine.has(s)).slice(0, 40).map(([s, w]) => `- ${s}: ${w}`).join("\n") || "- none loaded"}
 
-Suggest ${n} stocks or ETFs this investor doesn't own or watch yet, that would fit their style and themes and balance what they hold. Use real tickers listed on major exchanges, as Yahoo Finance writes them.
+${positionsLine()}\n\nSuggest ${n} stocks or ETFs this investor doesn't own or watch yet, that would fit their style and themes and balance what they hold. Use real tickers listed on major exchanges, as Yahoo Finance writes them.${strategies.some(g => g.status !== "retired") ? "\nThe investor's strategies come first: make sure ideas serve each active strategy whose timing has come or is near (for example the kind of company a strategy names, or what to buy after a planned sale), and say which strategy each idea serves. For each active strategy, also say in one or two sentences where it stands today given the positions and prices above (for example how far a stock is from its average price) and what would fit it." : ""}
 Your knowledge has a cutoff, so don't claim recent events you can't see here.
-JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2 sentences in plain words","fit":"1 sentence on how it fits this portfolio","risk":"1 sentence on the main risk","signal":"buy|hold"}],"note":"one sentence about this set of ideas"}`;
+JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2 sentences in plain words","fit":"1 sentence on how it fits this portfolio","risk":"1 sentence on the main risk","signal":"buy|hold","serves":"strategy id like g1abc, or empty"}],"strategies":[{"id":"strategy id","note":"where it stands today and what would fit"}],"note":"one sentence about this set of ideas"}`;
     const o = parseJSON(await aiCall(TONE, user, 1800, "ideas"));
     const list = [];
     await pool((o.ideas || []).slice(0, n + 2), cfg("concurrency"), async it => {
@@ -790,11 +810,14 @@ JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2
         const { meta, pts } = await yChart(sym, "1mo", "1d");
         const q = priceFrom(meta, pts);
         list.push({ s: meta.symbol || sym, name: meta.longName || meta.shortName || it.name || sym, why: String(it.why || ""), fit: String(it.fit || ""), risk: String(it.risk || ""),
-          signal: it.signal === "hold" ? "hold" : "buy", price: q.price, prev: q.prev, cur: meta.currency, pts, order: (o.ideas || []).indexOf(it) });
+          signal: it.signal === "hold" ? "hold" : "buy", price: q.price, prev: q.prev, cur: meta.currency, pts, order: (o.ideas || []).indexOf(it),
+          serves: strategies.some(g => g.id === it.serves) ? it.serves : "" });
       } catch (e) {}   // a ticker Yahoo doesn't know is left out
     });
     list.sort((a, b) => a.order - b.order);
-    insights.ideas = { list: list.slice(0, n), note: String(o.note || ""), style: settings.style, by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now() };
+    const notes = {};
+    for (const g of Array.isArray(o.strategies) ? o.strategies : []) if (g && strategies.some(x => x.id === g.id) && g.note) notes[g.id] = String(g.note).slice(0, 500);
+    insights.ideas = { list: list.slice(0, n), notes, note: String(o.note || ""), style: settings.style, by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now() };
     write("insights", insights); push();
     if (!list.length) toast("No ideas could be checked against market data. Try again.");
   } catch (e) { toast("Ideas not found: " + String(e.message || e).slice(0, 90)); }
@@ -1135,7 +1158,7 @@ function clientState() {
       const m = market[x.s] || {};
       return {
         s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0,
-        price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, at: m.at || 0, err: m.err || null, pts: m.pts || [],
+        price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
         st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
         story: insights.stories[x.s] || null,
@@ -1144,6 +1167,7 @@ function clientState() {
     totals: tot,
     briefing: insights.briefing ? Object.assign({}, insights.briefing, { stocks: undefined, stale: insights.briefing.sig !== briefingSig() }) : null,
     ideas: insights.ideas,
+    strategies,
     busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy] },
     ai: {
       provider: settings.aiProvider,
@@ -1208,7 +1232,7 @@ async function askSecret(id) {
   return true;
 }
 
-const hist = {};   // longer histories (5 years), kept in memory for this run
+const hist = {};   // charts beyond the daily year (a day, a week, five years), kept in memory for this run
 async function handle(m) {
   const x = m.s ? stocks.find(y => y.s === m.s) : null;
   switch (m.type) {
@@ -1286,10 +1310,13 @@ async function handle(m) {
       write("market", market); return push();
     }
     case "history": {
-      const key = m.s + "|" + m.v;
-      if (!hist[key]) {
-        try { hist[key] = (await yChart(m.s, m.v === "5y" ? "5y" : "1y", m.v === "5y" ? "1wk" : "1d")).pts; }
-        catch (e) { return toast("History not loaded: " + String(e.message || e).slice(0, 60)); }
+      const key = m.s + "|" + m.v, intra = m.v === "1d" || m.v === "5d";
+      if (!hist[key] || (intra && Date.now() - hist[key].at > 5 * 60e3)) {   // a day and a week: five minutes old at most
+        try {
+          const r = intra ? await yChart(m.s, m.v, m.v === "1d" ? "5m" : "30m", true) : await yChart(m.s, "5y", "1wk");
+          const prevClose = num(r.meta.chartPreviousClose) != null ? num(r.meta.chartPreviousClose) : num(r.meta.previousClose);
+          hist[key] = { pts: r.pts, intraday: intra, base: m.v === "1d" ? prevClose : null, at: Date.now() };
+        } catch (e) { return call("onHistory", m.s, m.v, { pts: [], err: String(e.message || e).slice(0, 80), at: Date.now() }); }
       }
       return call("onHistory", m.s, m.v, hist[key]);
     }
@@ -1322,6 +1349,18 @@ async function handle(m) {
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
       catch (e) { return call("__done", m.req, false, String(e.message || e)); }
     case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
+    case "stratadd": {   // Ideas › My strategies
+      const text = String(m.text || "").trim().slice(0, 600);
+      if (!text) return;
+      strategies.unshift({ id: "g" + Date.now().toString(36), text, when: String(m.when || "").trim().slice(0, 80), status: "active", at: Date.now() });
+      write("strategies", strategies); return push();
+    }
+    case "stratretire": case "stratrestore": {
+      const g = strategies.find(x => x.id === m.v);
+      if (g) { g.status = m.type === "stratretire" ? "retired" : "active"; g.retiredAt = m.type === "stratretire" ? Date.now() : null; write("strategies", strategies); }
+      return push();
+    }
+    case "stratdelete": strategies = strategies.filter(x => x.id !== m.v); write("strategies", strategies); return push();
     case "startlog": {
       let txt = "";
       try { txt = FileManager.local().readString(LOG_PATH).split("\n").slice(-40).join("\n"); } catch (e) {}
@@ -1381,7 +1420,8 @@ function clientApp() {
   const look = { theme: S.settings.theme || "auto", density: S.settings.density || "comfortable", font: S.settings.font || "sans", textSize: +S.settings.textSize || 1 };
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
-  let newsOpen = null; const tl = {};   // the headline open in the TL;DR sheet, and TL;DRs by link
+  let newsOpen = null; const tl = {};
+  let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
   const $ = s => document.querySelector(s);
@@ -1391,7 +1431,6 @@ function clientApp() {
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
   const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
-  if (tab === "ideas" && !S.settings.hasKey) tab = "own";
 
   // ---- appearance (app-blueprints · settings, Step 3) ----
   const THEMES = [["auto", "Auto"]].concat(Object.keys(S.palettes).map(k => [k, k[0].toUpperCase() + k.slice(1)]));
@@ -1438,14 +1477,13 @@ function clientApp() {
   // ---- bridge ← Scriptable ----
   window.recv = st => {
     S = st; syncBusy(); aiLoading.clear();
-    if (tab === "ideas" && !S.settings.hasKey) tab = "own";
-    if (openSym && !S.stocks.some(x => x.s === openSym)) openSym = null;
+      if (openSym && !S.stocks.some(x => x.s === openSym)) openSym = null;
     if (newsOpen && !S.stocks.some(x => x.s === newsOpen.s)) newsOpen = null;
     renderAll();
   };
   window.onProgress = (d, t) => { progress = t ? [d, t] : null; renderStatus(); };
   window.onSearch = res => { results = res; searching = false; renderAdd(); };
-  window.onHistory = (s, r, pts) => { hist[s + "|" + r] = pts; if (openSym === s) renderDetail(); };
+  window.onHistory = (s, r, h) => { hist[s + "|" + r] = h; histWant.delete(s + "|" + r); if (openSym === s) renderDetail(); };
   window.onBusy = (k, on) => { if (on) busyK.add(k); else busyK.delete(k); renderAll(); };
   window.onPasted = () => { pasteText = ""; const t = $("#paste"); if (t) t.value = ""; };
   window.toast = msg => {
@@ -1525,18 +1563,191 @@ function clientApp() {
     const d = pts.map((p, i) => (i ? "L" : "M") + (i * W / (pts.length - 1)).toFixed(1) + " " + (2 + (H - 4) * (1 - (p[1] - mn) / rg)).toFixed(1)).join("");
     return `<svg class="trendln ${c}${wide ? " wide" : ""}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><path d="${d}"/></svg>`;
   }
-  function chartSVG(pts, long) {
-    if (!pts || pts.length < 2) return `<p class="muted pad">No price history yet.</p>`;
-    const W = 340, H = 160, vs = pts.map(p => p[1]);
-    const mn = Math.min(...vs), mx = Math.max(...vs), rg = mx - mn || 1;
+  const HIST_R = ["1d", "5d", "5y"];
+  const clock = t => new Date(t * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const wkClock = t => new Date(t * 1000).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  // o: { intraday, span ("1d" | "5d"), base (yesterday's close for a day), weekly, cur, err }
+  function chartSVG(pts, long, o = {}) {
+    if (!pts || pts.length < 2) return `<p class="muted pad">${o.err ? "Chart not loaded: " + esc(o.err) + "." : o.intraday ? "No trading yet in this period." : "No price history yet."}</p>`;
+    const W = 340, H = 160, vs = pts.map(p => p[1]), hasBase = o.base != null && isFinite(o.base);
+    const base = hasBase ? o.base : vs[0], hi = Math.max(...vs), lo = Math.min(...vs);
+    const mn = Math.min(lo, base), mx = Math.max(hi, base), rg = mx - mn || 1;
     const X = i => i * W / (pts.length - 1), Y = v => 6 + (H - 12) * (1 - (v - mn) / rg);
     const d = pts.map((p, i) => (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p[1]).toFixed(1)).join("");
-    const chg = (vs[vs.length - 1] / vs[0] - 1) * 100, c = cls(chg);
-    return `<figure class="chart ${c}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Price chart, ${pct(chg)} over this period">
-      <path class="ar" d="${d}L${W} ${H}L0 ${H}Z"/><path class="ln" d="${d}"/><line class="base" x1="0" x2="${W}" y1="${Y(vs[0]).toFixed(1)}" y2="${Y(vs[0]).toFixed(1)}"/></svg>
-      <figcaption><span>${dayDate(pts[0][0], long)}</span><span class="${c}">${pct(chg)} in this period</span><span>${dayDate(pts[pts.length - 1][0], long)}</span></figcaption>
-      <div class="chart-hl"><span>High ${nf(mx)}</span><span>Low ${nf(mn)}</span></div></figure>`;
+    const chg = (vs[vs.length - 1] / base - 1) * 100, c = cls(chg);
+    chartNow = { pts, long, intraday: !!o.intraday, span: o.span, weekly: !!o.weekly, base, W, H, mn, rg, cur: o.cur || "" };
+    const lab = t => o.intraday ? (o.span === "1d" ? clock(t) : wkClock(t)) : dayDate(t, long);
+    return `<figure class="chart ${c}"><div class="xtip" hidden></div><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Price chart, ${pct(chg)} over this period. Touch to see the price at any moment.">
+      <path class="ar" d="${d}L${W} ${H}L0 ${H}Z"/><path class="ln" d="${d}"/><line class="base" x1="0" x2="${W}" y1="${Y(base).toFixed(1)}" y2="${Y(base).toFixed(1)}"/>
+      <g class="xh" style="display:none"><line class="xl" x1="0" x2="0" y1="0" y2="${H}"/><circle class="xd" r="4.5" cx="0" cy="0"/></g></svg>
+      <figcaption><span>${lab(pts[0][0])}</span><span class="${c}">${pct(chg)} ${o.span === "1d" ? (hasBase ? "since yesterday's close" : "today") : "in this period"}</span><span>${lab(pts[pts.length - 1][0])}</span></figcaption>
+      <div class="chart-hl"><span>High ${nf(hi)}</span><span class="muted">Touch the chart to see any price</span><span>Low ${nf(lo)}</span></div></figure>`;
   }
+  function chartFor(x) {
+    if (HIST_R.includes(range)) {
+      const h = hist[x.s + "|" + range] || {};
+      return chartSVG(h.pts, range === "5y", { intraday: !!h.intraday, span: range, base: h.base, weekly: range === "5y", cur: x.cur, err: h.err });
+    }
+    const p = x.pts || [];
+    return chartSVG(range === "1m" ? p.slice(-23) : range === "6m" ? p.slice(-127) : p, false, { cur: x.cur });
+  }
+  // Touch or drag across a chart: a line, a dot and the price, time and change at that moment.
+  function inspectAt(fig, clientX) {
+    const c = chartNow, svg = fig && fig.querySelector("svg");
+    if (!c || !svg) return;
+    const r = svg.getBoundingClientRect(), f = Math.min(1, Math.max(0, (clientX - r.left) / (r.width || 1)));
+    const i = Math.round(f * (c.pts.length - 1)), p = c.pts[i], x = i * c.W / (c.pts.length - 1), y = 6 + (c.H - 12) * (1 - (p[1] - c.mn) / c.rg);
+    const g = svg.querySelector(".xh"); g.style.display = "";
+    const ln = g.querySelector(".xl"); ln.setAttribute("x1", x); ln.setAttribute("x2", x);
+    const dot = g.querySelector(".xd"); dot.setAttribute("cx", x); dot.setAttribute("cy", y);
+    const when = c.intraday ? (c.span === "1d" ? clock(p[0]) : wkClock(p[0]))
+      : new Date(p[0] * 864e5).toLocaleDateString(undefined, c.weekly ? { day: "numeric", month: "short", year: "numeric" } : { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+    const ch = (p[1] / c.base - 1) * 100, tip = fig.querySelector(".xtip");
+    tip.innerHTML = `<b>${money(p[1], c.cur)}</b><span class="${cls(ch)}">${pct(ch)}</span><small>${c.weekly ? "Week of " : ""}${esc(when)}</small>`;
+    tip.hidden = false;
+    const tw = tip.offsetWidth || 120, px = f * r.width;
+    tip.style.left = Math.max(0, Math.min(r.width - tw, px - tw / 2)) + "px";
+    clearTimeout(xhTimer);
+  }
+  function hideInspect(fig) {
+    if (!fig || inspecting === fig) return;
+    const g = fig.querySelector(".xh"), tip = fig.querySelector(".xtip");
+    if (g) g.style.display = "none"; if (tip) tip.hidden = true;
+  }
+  document.addEventListener("pointerdown", e => {
+    const svg = e.target.closest && e.target.closest(".chart svg");
+    if (!svg) return;
+    inspecting = svg.closest(".chart"); inspectAt(inspecting, e.clientX);
+  });
+  document.addEventListener("pointermove", e => { if (inspecting) inspectAt(inspecting, e.clientX); });
+  ["pointerup", "pointercancel"].forEach(t => document.addEventListener(t, () => {
+    if (!inspecting) return;
+    const f = inspecting; inspecting = null;
+    clearTimeout(xhTimer); xhTimer = setTimeout(() => hideInspect(f), 2500);   // the price stays a moment after you let go
+  }));
+
+  // ---- markets: is a stock's market open now, and when it opens or closes ----
+  // Regular hours in each exchange's own time zone, in minutes after midnight, Monday to Friday. Yahoo's trading
+  // period for a stock (x.tp) is used on top where it's known, which covers public holidays.
+  const MKTS = [
+    { id: "us", flag: "🇺🇸", name: "New York", ex: "NYSE · Nasdaq", tz: "America/New_York", s: [[570, 960]] },
+    { id: "tsx", flag: "🇨🇦", name: "Toronto", ex: "TSX", tz: "America/Toronto", s: [[570, 960]], sfx: ["TO", "V", "CN", "NE"] },
+    { id: "lse", flag: "🇬🇧", name: "London", ex: "London Stock Exchange", tz: "Europe/London", s: [[480, 990]], sfx: ["L", "IL"] },
+    { id: "xetra", flag: "🇩🇪", name: "Frankfurt", ex: "Xetra", tz: "Europe/Berlin", s: [[540, 1050]], sfx: ["DE", "F", "BE", "DU", "HM", "HA", "MU", "SG"] },
+    { id: "euronext", flag: "🇪🇺", name: "Paris · Amsterdam · Brussels", ex: "Euronext", tz: "Europe/Paris", s: [[540, 1050]], sfx: ["PA", "AS", "BR", "LS", "IR"] },
+    { id: "six", flag: "🇨🇭", name: "Zurich", ex: "SIX Swiss Exchange", tz: "Europe/Zurich", s: [[540, 1050]], sfx: ["SW"] },
+    { id: "milan", flag: "🇮🇹", name: "Milan", ex: "Borsa Italiana", tz: "Europe/Rome", s: [[540, 1050]], sfx: ["MI"] },
+    { id: "madrid", flag: "🇪🇸", name: "Madrid", ex: "BME", tz: "Europe/Madrid", s: [[540, 1050]], sfx: ["MC"] },
+    { id: "stockholm", flag: "🇸🇪", name: "Stockholm", ex: "Nasdaq Stockholm", tz: "Europe/Stockholm", s: [[540, 1050]], sfx: ["ST"] },
+    { id: "copenhagen", flag: "🇩🇰", name: "Copenhagen", ex: "Nasdaq Copenhagen", tz: "Europe/Copenhagen", s: [[540, 1020]], sfx: ["CO"] },
+    { id: "helsinki", flag: "🇫🇮", name: "Helsinki", ex: "Nasdaq Helsinki", tz: "Europe/Helsinki", s: [[600, 1110]], sfx: ["HE"] },
+    { id: "oslo", flag: "🇳🇴", name: "Oslo", ex: "Oslo Børs", tz: "Europe/Oslo", s: [[540, 980]], sfx: ["OL"] },
+    { id: "warsaw", flag: "🇵🇱", name: "Warsaw", ex: "GPW", tz: "Europe/Warsaw", s: [[540, 1020]], sfx: ["WA"] },
+    { id: "baltic", flag: "🇱🇹", name: "Vilnius · Riga · Tallinn", ex: "Nasdaq Baltic", tz: "Europe/Vilnius", s: [[600, 960]], sfx: ["VS", "RG", "TL"] },
+    { id: "tokyo", flag: "🇯🇵", name: "Tokyo", ex: "Tokyo Stock Exchange", tz: "Asia/Tokyo", s: [[540, 690], [750, 930]], sfx: ["T"] },
+    { id: "hongkong", flag: "🇭🇰", name: "Hong Kong", ex: "HKEX", tz: "Asia/Hong_Kong", s: [[570, 720], [780, 960]], sfx: ["HK"] },
+    { id: "sydney", flag: "🇦🇺", name: "Sydney", ex: "ASX", tz: "Australia/Sydney", s: [[600, 960]], sfx: ["AX"] },
+    { id: "crypto", flag: "🪙", name: "Crypto", ex: "Trades around the clock", tz: "UTC", always: true },
+  ];
+  const MK = {}, SFX = {};
+  MKTS.forEach(m => { MK[m.id] = m; (m.sfx || []).forEach(x => { SFX[x] = m; }); });
+  function mktOf(x) {
+    if (!x) return null;
+    const s = String(x.s || ""), byTz = x.tz ? MKTS.find(k => k.tz === x.tz) : null;
+    if (/-(USD|EUR|GBP|USDT|BTC)$/.test(s) || /crypto/i.test(x.type || "")) return MK.crypto;
+    const m = s.match(/\.([A-Z]{1,3})$/);
+    if (m) return SFX[m[1]] || byTz || null;
+    if (s.startsWith("^")) return byTz || (x.tz ? null : MK.us);
+    return x.tz && x.tz !== "America/New_York" && byTz ? byTz : MK.us;
+  }
+  const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const zfmt = {};
+  function zoned(ts, tz) {   // wall-clock parts of a moment in a time zone
+    const f = zfmt[tz] || (zfmt[tz] = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", weekday: "short" }));
+    const o = {}; f.formatToParts(new Date(ts)).forEach(p => { o[p.type] = p.value; });
+    return { y: +o.year, mo: +o.month, d: +o.day, h: +o.hour % 24, mi: +o.minute, s: +o.second, wd: WD.indexOf(o.weekday) };
+  }
+  const tzOff = (ts, tz) => { const z = zoned(ts, tz); return Date.UTC(z.y, z.mo - 1, z.d, z.h, z.mi, z.s) - Math.floor(ts / 1000) * 1000; };
+  function atLocal(y, mo, d, minutes, tz) {   // the moment a wall-clock time happens in a time zone
+    const guess = Date.UTC(y, mo - 1, d, 0, minutes);
+    let t = guess - tzOff(guess, tz);
+    return guess - tzOff(t, tz);
+  }
+  function sessions(mk, now) {
+    const out = [], z = zoned(now, mk.tz);
+    for (let k = -1; k <= 8; k++) {
+      const dt = new Date(Date.UTC(z.y, z.mo - 1, z.d + k)), wd = dt.getUTCDay();
+      if (wd === 0 || wd === 6) continue;
+      for (const [a, b] of mk.s) out.push([atLocal(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate(), a, mk.tz), atLocal(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate(), b, mk.tz)]);
+    }
+    return out;
+  }
+  function mktStatus(mk, tp, now = Date.now()) {
+    if (!mk) return null;
+    if (mk.always) return { open: true, always: true };
+    const ss = sessions(mk, now);
+    let cur = ss.find(([a, b]) => now >= a && now < b) || null, next = ss.find(([a]) => a > now) || null;
+    const prev = ss.filter(([, b]) => b <= now).pop();
+    if (tp && tp.start && tp.end) {
+      if (now >= tp.start && now < tp.end) cur = cur || [tp.start, tp.end];
+      else if (tp.start > now && tp.start - now < 6 * 864e5) {   // Yahoo's next session: later than the usual one means a holiday
+        if (cur && tp.start >= cur[1]) cur = null;
+        if (!cur && (!next || tp.start > next[0])) next = [tp.start, tp.end];
+      }
+    }
+    const lunch = !cur && prev && next && next[0] - prev[1] < 3 * 3600e3 && zoned(prev[1], mk.tz).d === zoned(next[0], mk.tz).d;
+    return { open: !!cur, closesAt: cur && cur[1], opensAt: !cur && next ? next[0] : null, since: cur && cur[0], lunch: !!lunch };
+  }
+  function dur(ms) {
+    const m = Math.max(1, Math.round(ms / 60e3)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mi = m % 60;
+    return d ? `${d} d ${h} h` : h ? `${h} h ${mi} min` : `${mi} min`;
+  }
+  const hm = mins => String(Math.floor(mins / 60)).padStart(2, "0") + ":" + String(mins % 60).padStart(2, "0");
+  const yourTime = ts => new Date(ts).toLocaleString(undefined, Math.abs(ts - Date.now()) < 20 * 3600e3 && new Date(ts).getDate() === new Date().getDate() ? { hour: "2-digit", minute: "2-digit" } : { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  function mkText(mk, st, long) {
+    if (st.always) return long ? "Open around the clock" : "Open 24/7";
+    if (st.open) return long ? `${esc(mk.ex)} open · closes in ${dur(st.closesAt - Date.now())}` : "Open";
+    if (st.lunch) return long ? `${esc(mk.ex)} on lunch break · reopens in ${dur(st.opensAt - Date.now())}` : "Lunch break";
+    return long ? `${esc(mk.ex)} closed${st.opensAt ? ` · opens in ${dur(st.opensAt - Date.now())} (${yourTime(st.opensAt)} your time)` : ""}` : "Closed";
+  }
+  function mkBadge(x, long) {
+    const mk = mktOf(x), st = mk && mktStatus(mk, x.tp);
+    if (!st) return "";
+    return `<span class="mk ${st.open ? "on" : st.lunch ? "lunch" : "off"} ${long ? "long" : ""}" data-s="${esc(x.s)}" data-long="${long ? 1 : 0}" title="${esc(mk.name)}">${mkText(mk, st, long)}</span>`;
+  }
+  function marketsHTML() {
+    const now = Date.now(), mine = new Map();
+    S.stocks.forEach(x => { const mk = mktOf(x); if (mk) { if (!mine.has(mk.id)) mine.set(mk.id, []); mine.get(mk.id).push(x); } });
+    const order = (a, b) => { const sa = mktStatus(a, null, now), sb = mktStatus(b, null, now);
+      return (sb.open - sa.open) || ((sa.open ? sa.closesAt : sa.opensAt) - (sb.open ? sb.closesAt : sb.opensAt)); };
+    const card = mk => {
+      const xs = mine.get(mk.id) || [], tp = (xs.find(x => x.tp) || {}).tp, st = mktStatus(mk, tp, now), z = zoned(now, mk.tz);
+      const state = st.always ? "Open 24/7" : st.open ? "Open" : st.lunch ? "Lunch break" : "Closed";
+      const prog = st.open && !st.always ? Math.round((now - st.since) / (st.closesAt - st.since) * 100) : null;
+      const today = new Date(Date.UTC(z.y, z.mo - 1, z.d));
+      const hoursYou = mk.always ? "" : mk.s.map(([a, b]) => yourTime(atLocal(z.y, z.mo, z.d, a, mk.tz)).replace(/^\w+\s/, "") + "–" + yourTime(atLocal(z.y, z.mo, z.d, b, mk.tz)).replace(/^\w+\s/, "")).join(", ");
+      return `<article class="mkt ${st.open ? "on" : ""}"><div class="mkt-h"><span class="mkt-f" aria-hidden="true">${mk.flag}</span>
+          <div class="grow"><b>${esc(mk.name)}</b><small>${esc(mk.ex)}${mk.always ? "" : ` · ${WD[z.wd]} ${hm(z.h * 60 + z.mi)} there`}</small></div>
+          <span class="mk ${st.open ? "on" : st.lunch ? "lunch" : "off"}">${state}</span></div>
+        ${mk.always ? "" : `<p class="mkt-c">${st.open ? `Closes in <b>${dur(st.closesAt - now)}</b>` : st.opensAt ? `${st.lunch ? "Reopens" : "Opens"} in <b>${dur(st.opensAt - now)}</b>` : ""}<small>${st.open ? `at ${yourTime(st.closesAt)} your time` : st.opensAt ? `at ${yourTime(st.opensAt)} your time` : ""}</small></p>
+        ${prog != null ? `<div class="mkt-p" role="progressbar" aria-valuenow="${prog}" aria-valuemin="0" aria-valuemax="100"><i style="width:${prog}%"></i></div>` : ""}
+        <p class="note">Hours ${mk.s.map(([a, b]) => hm(a) + "–" + hm(b)).join(", ")} local · ${hoursYou} your time · Mon–Fri</p>`}
+        ${xs.length ? `<div class="mkt-s">${xs.map(x => `<button class="chip" data-act="open" data-v="${esc(x.s)}">${esc(x.s)} <span class="${cls(dayPct(x))}">${pct(dayPct(x), 1)}</span></button>`).join("")}</div>` : ""}</article>`;
+    };
+    const yours = MKTS.filter(m => mine.has(m.id)).sort(order), others = MKTS.filter(m => !mine.has(m.id)).sort(order);
+    const openN = MKTS.filter(m => !m.always && mktStatus(m, null, now).open).length;
+    return `<div class="listbar"><span>Your time ${new Date(now).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })} · ${openN} of ${MKTS.length - 1} markets open</span></div>
+      ${yours.length ? `<h3 class="sec">Where your stocks trade</h3><div class="mkts">${yours.map(card).join("")}</div>` : ""}
+      <h3 class="sec">${yours.length ? "Other markets" : "Markets"}</h3><div class="mkts">${others.map(card).join("")}</div>
+      <p class="note pad">Regular trading hours, Monday to Friday. For markets where you have stocks, Yahoo's own session times also catch public holidays; other markets may show open on a holiday. Updates every 30 seconds.</p>`;
+  }
+  function tickMarkets() {
+    if (document.hidden) return;
+    if (tab === "markets" && !openSym && !newsOpen) return render();
+    document.querySelectorAll(".mk[data-s]").forEach(el => { const x = byS(el.dataset.s); if (x) el.outerHTML = mkBadge(x, el.dataset.long === "1"); });
+  }
+  setInterval(tickMarkets, 30000);
+
   function paras(t, links) {
     return String(t || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\s*\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, g) => links ? `<span class="refw">${g.split(/\s*,\s*/).map(n => links[+n - 1] ? `<button class="ref" data-act="openlink" data-v="${esc(links[+n - 1].l)}" aria-label="Open headline ${+n}">${+n}</button>` : "").join("")}</span>` : "")}</p>`);
@@ -1553,13 +1764,13 @@ function clientApp() {
   }
   function renderTabs() {
     const own = S.stocks.filter(x => x.list === "own").length, watch = S.stocks.length - own;
-    const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null]].concat(S.settings.hasKey ? [["ideas", "✦ Ideas", null]] : []);
+    const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null], ["markets", "Markets", null], ["ideas", S.settings.hasKey ? "✦ Ideas" : "Ideas", null]];
     $("#tabs").innerHTML = t.map(([k, l, n]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
   function renderAll() { render(); renderDetail(); renderNews(); renderAdd(); renderAI(); renderCfg(); }
   function render() {
     applyLook(); renderStatus(); renderTabs();
-    $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : listHTML();
+    $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : tab === "markets" ? marketsHTML() : listHTML();
   }
 
   // ---- portfolio and watchlist ----
@@ -1591,7 +1802,7 @@ function clientApp() {
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
     return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
-      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small></div>
+      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${mkBadge(x)}</div>
       ${spark((x.pts || []).slice(-23), c)}
       <div class="r-r"><b>${money(x.price, x.cur)}</b><span class="pill ${c}">${pct(d)}</span></div>${sig}</div>`;
   }
@@ -1648,19 +1859,40 @@ function clientApp() {
   }
 
   // ---- ideas ----
+  function strategiesHTML() {
+    const all = S.strategies || [], act = all.filter(g => g.status !== "retired"), ret = all.filter(g => g.status === "retired");
+    const notes = (S.ideas && S.ideas.notes) || {};
+    const card = g => `<article class="strat-c ${g.status === "retired" ? "retired" : ""}"><p class="strat-t">${esc(g.text)}</p>
+      <small class="muted">${g.when ? `Timing: ${esc(g.when)} · ` : ""}Set ${rel(g.at)}${g.status === "retired" && g.retiredAt ? ` · retired ${rel(g.retiredAt)}` : ""}</small>
+      ${g.status !== "retired" && notes[g.id] ? `<p class="strat-ai"><span class="badge-ai">✦ Where it stands</span> ${esc(notes[g.id])}</p>` : ""}
+      <div class="aic-btns">${g.status === "retired"
+        ? `<button class="sm" data-act="stratrestore" data-v="${esc(g.id)}">Bring back</button><button class="sm danger ${stratArmed === g.id ? "armed" : ""}" data-act="stratdelete" data-v="${esc(g.id)}">${stratArmed === g.id ? "Confirm" : "Delete"}</button>`
+        : `<button class="sm" data-act="stratretire" data-v="${esc(g.id)}">Retire</button>`}</div></article>`;
+    return `<section class="strat"><h2 class="brief-t">My strategies</h2>
+      <p class="brief-p muted">Your own plans and directions${S.settings.hasKey ? ". ✦ Ideas, the briefing and stock stories take them into account" : ""}. Retire one when it's done or no longer what you want.</p>
+      ${act.map(card).join("") || `<p class="note">No strategies yet. For example: “When Nike recovers to my average price, sell it and buy a pharmaceutical company”, or “Over the next six months, invest more in pharma companies working with AI companies”.</p>`}
+      <div class="strat-add"><label for="stratText" class="lk-l">New strategy</label>
+        <textarea id="stratText" rows="3" placeholder="e.g. When Nike recovers, sell it and buy a pharmaceutical company">${esc(stratText)}</textarea>
+        <input id="stratWhen" class="cfgin wide" placeholder="Timing (optional), e.g. in six months, when NKE is back at $80" value="${esc(stratWhen)}">
+        <div class="aic-btns"><button class="primary" data-act="stratadd">Add strategy</button></div></div>
+      ${ret.length ? `<details class="strat-ret"><summary>Retired strategies (${ret.length})</summary>${ret.map(card).join("")}</details>` : ""}</section>`;
+  }
   function ideasHTML() {
-    const I = S.ideas, bz = isBusy("ideas");
+    const I = S.ideas, bz = isBusy("ideas"), act = (S.strategies || []).filter(g => g.status !== "retired").length;
+    const strat = strategiesHTML();
+    if (!S.settings.hasKey) return strat + `<p class="note pad">For ✦ AI ideas that follow your strategies, add a Claude or OpenAI key in <button class="link small" data-act="cfgopen">Settings › AI settings</button>.</p>`;
     const head = `<section class="brief"><span class="badge-ai">✦ AI ideas</span><h2 class="brief-t">Stocks worth a closer look</h2>
-      <p class="brief-p muted">Picked for a ${STYLE_L[S.settings.style] || "balanced"} investor and your themes, from what's trending and from good-value lists today. Change both in Settings.</p>
+      <p class="brief-p muted">Picked for a ${STYLE_L[S.settings.style] || "balanced"} investor, ${act ? `your ${act} strateg${act === 1 ? "y" : "ies"}, ` : ""}your themes and what you hold, from what's trending and from good-value lists today.</p>
       <div class="aic-btns"><button class="primary" data-act="ideas" ${bz ? "disabled" : ""}>${bz ? "Looking…" : I ? "Find new ideas" : "Find ideas"}</button></div></section>`;
-    if (!I || !(I.list || []).length) return head;
-    return head + `<p class="note pad">✦ AI ideas by ${PN[I.by] || esc(I.by)}, ${rel(I.at)}. ${esc(I.note)} AI knowledge has a cutoff, so read the latest news before you buy. Not financial advice.</p>` + I.list.map(ideaCard).join("");
+    if (!I || !(I.list || []).length) return strat + head;
+    return strat + head + `<p class="note pad">✦ AI ideas by ${PN[I.by] || esc(I.by)}, ${rel(I.at)}. ${esc(I.note)} AI knowledge has a cutoff, so read the latest news before you buy. Not financial advice.</p>` + I.list.map(ideaCard).join("");
   }
   function ideaCard(it) {
     const d = dayPct(it), c = cls(d), have = S.stocks.some(x => x.s === it.s);
     return `<article class="idea"><div class="idea-h"><div class="r-l"><b class="sym">${esc(it.s)}</b><small>${esc(it.name)}</small></div>
       <div class="r-r"><b>${money(it.price, it.cur)}</b><span class="pill ${c}">${pct(d)}</span></div></div>
       ${spark(it.pts, cls(it.pts && it.pts.length > 1 ? it.pts[it.pts.length - 1][1] - it.pts[0][1] : null), true)}<p class="cap">Last month</p>
+      ${it.serves && (S.strategies || []).some(g => g.id === it.serves) ? `<p class="serves">↳ For your strategy: “${esc((S.strategies.find(g => g.id === it.serves).text).slice(0, 90))}${S.strategies.find(g => g.id === it.serves).text.length > 90 ? "…" : ""}”</p>` : ""}
       <p>${esc(it.why)}</p>${it.fit ? `<p class="ink2"><b>How it fits.</b> ${esc(it.fit)}</p>` : ""}${it.risk ? `<p class="ink2"><b>Main risk.</b> ${esc(it.risk)}</p>` : ""}
       <div class="aic-btns">${sigChip({ signal: it.signal })}<span class="grow"></span>${have ? `<span class="note">On your lists ✓</span>` : `<button class="sm primary" data-act="watchidea" data-v="${esc(it.s)}">Add to watchlist</button>`}</div></article>`;
   }
@@ -1681,24 +1913,20 @@ function clientApp() {
     perf: "Performance: how much the price changed over each period. Dividends aren't included.",
     crowd: "Crowd mood: recent StockTwits posts tagged bullish versus bearish. Loud and fast-moving, not always right.",
   };
-  function chartPts(x) {
-    if (range === "5y") return hist[x.s + "|5y"] || null;
-    const p = x.pts || [];
-    return range === "1m" ? p.slice(-23) : range === "6m" ? p.slice(-127) : p;
-  }
   function renderDetail() {
     const el = $("#detail"), keep = el.scrollTop;
     const x = openSym && byS(openSym);
     el.classList.toggle("open", !!x); lockBody();
     if (!x) return;
     const d = dayPct(x), c = cls(d);
-    if (range === "5y" && !hist[x.s + "|5y"]) send("history", { s: x.s, v: "5y" });
+    const hk = x.s + "|" + range;
+    if (HIST_R.includes(range) && (!hist[hk] || (range !== "5y" && Date.now() - hist[hk].at > 5 * 60e3)) && !histWant.has(hk)) { histWant.add(hk); send("history", { s: x.s, v: range }); }
     el.innerHTML = `<div class="sh-head"><h2>${esc(x.s)}</h2><button class="link" data-act="close">Done</button></div><div class="sh-body">
       <p class="dname">${esc(x.name)}<small>${esc([x.exch, x.cur].filter(Boolean).join(" · "))}</small></p>
       <div class="dprice"><b>${money(x.price, x.cur)}</b><span class="pill ${c}">${pct(d)} today</span></div>
-      <p class="note">${x.mt ? "Last trade " + when(x.mt) : x.err ? "Couldn't load: " + esc(x.err) : ""}</p>
-      <div class="seg wide rng">${[["1m", "1M"], ["6m", "6M"], ["1y", "1Y"], ["5y", "5Y"]].map(([v, l]) => `<button class="${range === v ? "on" : ""}" data-act="range" data-v="${v}">${l}</button>`).join("")}</div>
-      ${range === "5y" && !hist[x.s + "|5y"] ? `<p class="muted pad">Loading five years…</p>` : chartSVG(chartPts(x), range === "5y")}
+      <p class="note">${x.mt ? "Last trade " + when(x.mt) : x.err ? "Couldn't load: " + esc(x.err) : ""}</p>${mkBadge(x, true)}
+      <div class="seg wide rng">${[["1d", "1D"], ["5d", "1W"], ["1m", "1M"], ["6m", "6M"], ["1y", "1Y"], ["5y", "5Y"]].map(([v, l]) => `<button class="${range === v ? "on" : ""}" data-act="range" data-v="${v}">${l}</button>`).join("")}</div>
+      ${HIST_R.includes(range) && !hist[x.s + "|" + range] ? `<p class="muted pad chart-wait">Loading ${range === "1d" ? "today" : range === "5d" ? "the week" : "five years"}…</p>` : chartFor(x)}
       ${holdingHTML(x)}${signalHTML(x)}${storyHTML(x)}${numbersHTML(x)}${aboutHTML(x)}${newsHTML(x)}${manageHTML(x)}
     </div>`;
     el.scrollTop = keep;   // re-renders must not jump the user back to the top
@@ -1976,7 +2204,7 @@ function clientApp() {
             <span class="fl-fs">${top.length} read · newest ${top.length ? rel(newest(x)) : "—"}</span><span class="chev" aria-hidden="true">›</span></button></article>`;
         const dk = dgKey(x), dd = dg[dk], busyS = !!dgWait[dk], on = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s;
         return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="listenstock" data-v="${esc(x.s)}" aria-label="Listen to ${esc(x.s)} news">
-            <b>${esc(x.s)} <span class="fl-spk ${busyS ? "busy" : ""}">${busyS ? `<span class="busy-dot"></span>` : SPK}</span></b><small>${short}</small></button>${flashFacts(x)}
+            <b>${esc(x.s)} <span class="fl-spk ${busyS ? "busy" : ""}">${busyS ? `<span class="busy-dot"></span>` : SPK}</span></b><small>${short}</small></button>${mkBadge(x)}${flashFacts(x)}
             <button class="fl-open" data-act="open" data-v="${esc(x.s)}">Details ›</button></div>
           <div class="fl-n">${isNew ? `<span class="fl-new">New since you folded it</span>` : ""}${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
             : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}
@@ -2288,7 +2516,7 @@ function clientApp() {
     searching = true; results = null; renderAdd(); send("search", { q: v.trim() });
   }
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "q") { e.preventDefault(); e.target.blur(); find(); } });
-  document.addEventListener("input", e => { if (e.target.id === "paste") pasteText = e.target.value; });
+  document.addEventListener("input", e => { if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
   document.addEventListener("click", e => {
     if (e.target.closest("select, option, input, textarea, summary")) return;   // form controls handle themselves
     const t = e.target.closest("[data-act]");
@@ -2318,6 +2546,18 @@ function clientApp() {
         S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
       }
       case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how Stockit will read your briefing, stories and headlines to you." }]); break;
+      case "stratadd": {
+        const tx = stratText.trim();
+        if (!tx) { window.toast("Describe your strategy first"); const ta = $("#stratText"); if (ta) ta.focus(); break; }
+        send("stratadd", { text: tx, when: stratWhen.trim() }); stratText = ""; stratWhen = "";
+        window.toast(S.settings.hasKey ? "Strategy added. The next ✦ ideas and briefing take it into account" : "Strategy added"); break;
+      }
+      case "stratretire": send("stratretire", { v }); window.toast("Retired. It's kept under Retired strategies"); break;
+      case "stratrestore": send("stratrestore", { v }); break;
+      case "stratdelete":
+        if (stratArmed !== v) { stratArmed = v; render(); setTimeout(() => { if (stratArmed === v) { stratArmed = null; render(); } }, 3500); break; }
+        stratArmed = null; send("stratdelete", { v }); break;
+      case "mktopen": tab = v; render(); break;
       case "open": openSym = v; explainKey = null; rmArmed = null; renderDetail(); send("detail", { s: v }); $("#detail").scrollTop = 0; break;
       case "close": openSym = null; renderDetail(); break;
       case "range": range = v; send("set", { k: "range", v }); renderDetail(); break;
@@ -2442,9 +2682,9 @@ button[disabled]{opacity:.55}
 .icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #top.busy .rf svg{animation:rot 1s linear infinite}
 @keyframes rot{to{transform:rotate(360deg)}}
-.tabs{display:flex;gap:4px;margin-top:10px;overflow-x:auto;scrollbar-width:none}
+.tabs{display:flex;gap:0;justify-content:space-between;margin-top:10px;overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
-.tabs button{padding:9px 12px 10px;font-weight:600;font-size:calc(15px * var(--ts));color:var(--muted);border-bottom:2.5px solid transparent;white-space:nowrap}
+.tabs button{padding:9px 6px 10px;font-weight:600;font-size:calc(14px * var(--ts));color:var(--muted);border-bottom:2.5px solid transparent;white-space:nowrap}
 .tabs button.on{color:var(--ink);border-bottom-color:var(--signal)}
 .tabs .n{font-weight:500;font-size:calc(12px * var(--ts));color:var(--muted)}
 main{padding:12px 14px 30px;max-width:720px;margin:0 auto}
@@ -2747,6 +2987,44 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .tl-listen{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 18px}
 .primary.block{display:block;width:100%;text-align:center;padding:13px 16px;margin:6px 0 4px}
 .err{color:var(--danger)}
+/* Market open or closed */
+.mk{display:inline-flex;align-items:center;gap:5px;font-size:calc(11.5px * var(--ts));font-weight:700;color:var(--muted);white-space:nowrap}
+.mk::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.7}
+.mk.on{color:var(--up)} .mk.on::before{background:var(--up);opacity:1;box-shadow:0 0 0 3px color-mix(in srgb, var(--up) 22%, transparent)}
+.mk.lunch{color:var(--amber)} .mk.lunch::before{background:var(--amber);opacity:1}
+.mk.long{display:flex;white-space:normal;font-size:calc(13px * var(--ts));font-weight:600;margin:2px 0 10px}
+.r-l .mk{display:flex;margin-top:2px}
+.mkts{display:flex;flex-direction:column;gap:10px}
+.mkt{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px}
+.mkt.on{border-left:4px solid var(--up)}
+.mkt-h{display:flex;align-items:center;gap:10px}
+.mkt-h b{display:block;font:700 calc(16px * var(--ts))/1.2 var(--display)}
+.mkt-h small{display:block;font-size:calc(12.5px * var(--ts));color:var(--muted)}
+.mkt-f{font-size:24px;line-height:1}
+.mkt-c{margin:10px 0 6px;font-size:calc(15px * var(--ts))} .mkt-c b{font-size:calc(17px * var(--ts))}
+.mkt-c small{display:block;color:var(--muted);font-size:calc(12.5px * var(--ts))}
+.mkt-p{height:6px;border-radius:3px;background:var(--rule);overflow:hidden;margin:4px 0 8px} .mkt-p i{display:block;height:100%;background:var(--up)}
+.mkt-s{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mkt-s .chip{background:var(--paper);box-shadow:inset 0 0 0 1px var(--rule);color:var(--ink)}
+/* Charts you can touch */
+.chart{position:relative}
+.chart svg{touch-action:pan-y;cursor:crosshair}
+.xh .xl{stroke:var(--ink-2);stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke}
+.xh .xd{fill:var(--paper);stroke:currentColor;stroke-width:2.5;vector-effect:non-scaling-stroke}
+.xtip{position:absolute;top:-6px;z-index:2;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;background:var(--ink);color:var(--paper);border-radius:9px;padding:6px 10px;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:220px}
+.xtip b{font-size:calc(15px * var(--ts))} .xtip small{flex-basis:100%;font-size:calc(11.5px * var(--ts));opacity:.8}
+.xtip .up{color:#86efac} .xtip .down{color:#fca5a5}
+.rng button{padding-left:4px;padding-right:4px}
+/* My strategies */
+.strat{background:var(--sheet);border:1px solid var(--rule);border-left:4px solid var(--amber);border-radius:12px;padding:var(--pad);margin:10px 0 16px}
+.strat-c{border-top:1px solid var(--rule);padding:10px 0 4px}
+.strat-c.retired{opacity:.7}
+.strat-t{font-size:calc(var(--d) * var(--ts));line-height:1.5;margin:0 0 2px;font-weight:600}
+.strat-ai{font-size:calc(14px * var(--ts));line-height:1.5;color:var(--ink-2);margin:8px 0 2px}
+.strat-add{border-top:1px solid var(--rule);padding-top:10px;margin-top:6px}
+.strat-add textarea{display:block;width:100%;margin-top:6px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);resize:vertical;-webkit-user-select:text;user-select:text}
+.strat-ret{margin-top:10px} .strat-ret summary{font-weight:700;color:var(--signal);font-size:calc(14px * var(--ts))}
+.serves{font-size:calc(13.5px * var(--ts));color:var(--amber);font-weight:600;margin:4px 0 8px}
 .booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
 .booting.note{flex-direction:column;text-align:center;color:var(--ink-2);padding:60px 24px}
 .booting.note b{font-size:calc(18px * var(--ts));color:var(--ink)}

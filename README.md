@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.4.1-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -108,8 +108,10 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 |---|---|
 | 💼 **Portfolio and watchlist** | Two tabs: stocks you own, with shares and average price, and stocks you watch. Each row shows the price, today's change, a one-month trend line and Stockit's view. Sort by value, today's move, signal or A–Z. |
 | 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings. |
-| 📊 **A page per stock** | 1M, 6M, 1Y and 5Y chart, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
+| 📊 **A page per stock** | 1D, 1W, 1M, 6M, 1Y and 5Y chart you can touch to see the price at any moment, whether its market is open, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
+| 🕒 **Markets** | Every stock shows whether its market is open right now. The Markets tab lists the markets where your stocks trade, then 16 others, each with a countdown to its next open or close, its hours in local and your time, and the trading day's progress. |
+| 🧭 **My strategies** | Write down your own plans in Ideas, such as "when Nike recovers, sell it and buy a pharma company", with an optional timing. ✦ Ideas serve them and say where each one stands; the briefing and stories take them into account. Retire a strategy when it's done. |
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
 | 🎧 **Listen to a stock's news** | Tap a stock in Flash: Stockit reads three of its articles in full (skipping any it can't open) and ✦ AI tells them as one spoken story of 350 to 550 words, naming its sources, then what it could mean for the stock. The story then appears under the card with its sources. Without a key, each article's key sentences are read in turn. |
@@ -126,6 +128,47 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Charts you can touch
+
+<img src="docs/screenshots/03-stock.png" width="250" align="right" alt="NVIDIA's one-day chart from yesterday's close, touched to show the price at 7:40 PM">
+
+Every stock's page has a chart from **one day** to **five years**: 1D (every five minutes, against yesterday's close), 1W, 1M, 6M, 1Y and 5Y.
+
+**Touch or drag across the chart** to see the price, the time or date and the change at that moment. The line and the price stay a moment after you let go. Vertical swipes still scroll the page.
+
+<br clear="right">
+
+## Markets: open or closed
+
+<img src="docs/screenshots/22-markets.png" width="250" align="right" alt="Markets tab: New York closed with a countdown to opening, Vilnius and Oslo open with time left">
+
+Every stock in Portfolio, Watchlist and Flash shows **Open** or **Closed** for its market, and its page says when it closes or opens, in your time.
+
+The **Markets** tab shows the markets where your stocks trade first, then the other big ones: New York, Toronto, London, Frankfurt, Euronext, Zurich, Milan, Madrid, Stockholm, Copenhagen, Helsinki, Oslo, Warsaw, Vilnius · Riga · Tallinn, Tokyo, Hong Kong, Sydney and crypto. Each one says:
+
+- **Open, Closed or Lunch break**, with a countdown: "Closes in 2 h 20 min" or "Opens in 4 h 50 min", and the time that is for you.
+- Its hours in local time and in yours, and how far through the trading day it is.
+- Which of your stocks trade there, with today's move (tap one to open it).
+
+Hours follow each exchange's own time zone, so summer and winter time are right everywhere. For markets where you hold stocks, Yahoo's session times also catch public holidays.
+
+<br clear="right">
+
+## My strategies
+
+<img src="docs/screenshots/23-strategies.png" width="250" align="right" alt="Ideas › My strategies: two active strategies with Where it stands notes, and a form to add one">
+
+In **Ideas › My strategies**, write down your own plans and directions, in your own words, with an optional timing. For example:
+
+- "When Nike recovers to my average price, sell it and buy a pharmaceutical company" (timing: "when NKE is back at $80").
+- "Over the next six months, invest more in pharma companies that work closely with AI companies."
+
+All your strategies are listed there. **Retire** one when it's done or no longer what you want; retired strategies stay under **Retired strategies**, where you can bring them back or delete them.
+
+With an AI key, your active strategies come first when Stockit looks for ✦ ideas: ideas serve them, each says which strategy it is for, and every strategy gets a short **Where it stands**, such as how far a stock is from your average price. The daily briefing and stock stories take your strategies into account too.
+
+<br clear="right">
 
 ## Flash news and TL;DRs
 
@@ -223,6 +266,10 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Get a stock's story and view | Open the stock and tap **Write the story** |
 | Find new ideas | Open **✦ Ideas** and tap **Find new ideas**; **Add to watchlist** keeps one |
 | Change shares or move a stock | Open the stock › **Manage** › **Edit shares**, **Move to watchlist** or **Remove** |
+| See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
+| See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
+| Put a plan aside | **Retire** on the strategy; bring it back from **Retired strategies** |
 | Scan the news | Open **Flash** |
 | Put a read card away | Tap **✓ Read — fold it**; tap the folded line to open it again. **Fold all** and **Open all** are at the top |
 | Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
@@ -260,7 +307,7 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 - **Everything runs on your phone.** There is no Stockit server and nothing is collected.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
 - **Your keys** (Claude, OpenAI and the optional Finnhub key) are stored in the iOS Keychain and only ever sent to the service they belong to.
-- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), so it can talk about your money; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
+- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), and your strategies, so it can talk about your money and your plans; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
 - **Network requests** go to Yahoo Finance, Google News and StockTwits for data, the publisher's page when you open a TL;DR, Finnhub if you add a key, your AI provider, and this repository for update checks.
 
 ## Where the data comes from
@@ -285,6 +332,7 @@ Stockit follows five shared blueprints: in-app updates, settings, AI configurati
 | Problem | Try this |
 |---|---|
 | Stockit opens to a blank or loading screen | Close it and open it again. If it keeps happening, open **Settings › Updates › Start-up log** and send what it shows |
+| A market shows open on a public holiday | Holidays are known for markets where you hold stocks, after a refresh; other markets follow their regular weekly hours |
 | A stock isn't found | Use its Yahoo Finance ticker, with the exchange suffix outside the US (`ASML.AS`, `VWCE.DE`) |
 | "Updated; couldn't load …" | That source didn't answer. Tap refresh again in a minute; the last loaded data stays on screen |
 | Company numbers are missing | Yahoo sometimes doesn't answer for these. Add a free Finnhub key in **Settings › News and signals** as a backup |
