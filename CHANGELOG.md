@@ -2,6 +2,22 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.13.3 (2026-10-30): Safer with your data
+
+- 🛟 **A damaged file can't stop you**: If a saved file can't be read, Stockit keeps a copy, starts it fresh and saves your changes again.
+- 💬 **Told, not hidden**: A short note says when Stockit kept a copy of data it couldn't read.
+- 🔑 **The right Add key**: Turn on AI now highlights Add key on the provider marked In use.
+
+**Changes**
+
+- Safe start-up 1.1.0: a file that arrived damaged is copied aside as `<name>.broken-<time>.json` and started from its default, so saving carries on; only a file iCloud didn't deliver is never written
+- AI invitation 1.2.1: Turn on AI pulses Add key on the card of the provider in use (`.aicard.active`), not the first one in the sheet
+
+**Fixes**
+
+- One damaged data file stopped every later save of that file until it was fixed by hand
+- Turn on AI pulsed the first Add key in AI settings instead of the provider in use
+
 ## 1.13.2 (2026-10-30): AI, from the start
 
 - ✦ **From the first launch**: Without a key, the AI invitation now shows the first time you open Stockit.

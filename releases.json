@@ -4,6 +4,36 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.13.3",
+      "date": "2026-10-30",
+      "title": "Safer with your data",
+      "highlights": [
+        {
+          "icon": "🛟",
+          "title": "A damaged file can't stop you",
+          "text": "If a saved file can't be read, Stockit keeps a copy, starts it fresh and saves your changes again."
+        },
+        {
+          "icon": "💬",
+          "title": "Told, not hidden",
+          "text": "A short note says when Stockit kept a copy of data it couldn't read."
+        },
+        {
+          "icon": "🔑",
+          "title": "The right Add key",
+          "text": "Turn on AI now highlights Add key on the provider marked In use."
+        }
+      ],
+      "changes": [
+        "Safe start-up 1.1.0: a file that arrived damaged is copied aside as `<name>.broken-<time>.json` and started from its default, so saving carries on; only a file iCloud didn't deliver is never written",
+        "AI invitation 1.2.1: Turn on AI pulses Add key on the card of the provider in use (`.aicard.active`), not the first one in the sheet"
+      ],
+      "fixes": [
+        "One damaged data file stopped every later save of that file until it was fixed by hand",
+        "Turn on AI pulsed the first Add key in AI settings instead of the provider in use"
+      ]
+    },
+    {
       "version": "1.13.2",
       "date": "2026-10-30",
       "title": "AI, from the start",
