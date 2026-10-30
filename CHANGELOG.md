@@ -2,6 +2,21 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.7.0 (2026-10-30): Ideas you can judge
+
+- 📊 **The numbers behind every idea**: P/E, dividend yield, market cap, 50- and 200-day averages, RSI, range and more on each idea.
+- 🔍 **Look before you add**: Tap an idea to open its full stock page: chart, numbers, news and story, without adding it.
+- 🗂 **A tidier Ideas tab**: My strategies, your themes and the ideas fold away, and your themes now live right there.
+
+**Changes**
+
+- Each ✦ idea shows P/E, forward P/E, dividend yield, market cap, 50-day and 200-day averages (with how far the price is from each), RSI over 14 days, beta, analyst target and rating, profit margin and revenue growth; tap any for what it means
+- Each idea also shows its sector, exchange, 52-week range, 1-month, 6-month and 1-year performance, and its price trend
+- Tap an idea (or See everything) to open its full stock page, the same as for your own stocks: charts from 1D to 5Y, numbers, headlines with TL;DRs, the ✦ story and whether its market is open; then Add to watchlist or I own this
+- Ideas › Themes you like: add and remove themes right in the Ideas tab (they're no longer in Settings)
+- My strategies, Themes you like and Stocks worth a closer look fold open and closed; Stockit remembers which you folded
+- Stock pages gain 50-day average, 200-day average and RSI tiles
+
 ## 1.6.0 (2026-10-30): All your money, one currency
 
 - 💶 **One currency for everything**: Stocks from every market add up in euros, dollars or the currency you choose.
