@@ -22,7 +22,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -170,15 +170,34 @@ const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return File
 const DIR = fm.joinPath(fm.documentsDirectory(), APP);
 if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
 const P = n => fm.joinPath(DIR, n + ".json");
-async function load(n, def) {
+// A short start-up log on the phone (local, not iCloud): Settings › Updates › Start-up log, and on screen if opening stalls.
+const LOG_PATH = FileManager.local().joinPath(FileManager.local().documentsDirectory(), APP_ID + "-startup.log");
+function startLog(msg) {
+  try {
+    const lfm = FileManager.local(), line = new Date().toISOString().slice(11, 19) + "  " + msg;
+    const old = lfm.fileExists(LOG_PATH) ? lfm.readString(LOG_PATH).split("\n").slice(-60) : [];
+    lfm.writeString(LOG_PATH, old.concat(line).join("\n"));
+  } catch (e) {}
+}
+const loadIssues = [];   // files iCloud didn't hand over in time
+async function load(n, def, waitMs = 10000) {
   const p = P(n);
   if (!fm.fileExists(p)) return def;
   try {
-    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) await fm.downloadFileFromiCloud(p);
+    if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) {
+      // iCloud can take a long time (or forever, offline): never let start-up hang on it (as BlogPulse 1.9.1)
+      await Promise.race([fm.downloadFileFromiCloud(p), new Promise(r => Timer.schedule(waitMs, false, r))]);
+      if (!fm.isFileDownloaded(p)) { loadIssues.push(n); startLog(`iCloud didn't deliver ${n}.json in ${waitMs / 1000} s`); return def; }
+    }
     return JSON.parse(fm.readString(p));
-  } catch (e) { return def; }   // a broken file falls back to defaults, never crashes
+  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // a broken file falls back to defaults, never crashes
 }
-const write = (n, v) => fm.writeString(P(n), JSON.stringify(v));
+// Data files are only written once they were read, so a slow start can never save an empty list over them.
+let dataLoaded = false;
+const write = (n, v) => {
+  if (n === "settings" ? !settingsOk : (["stocks", "market", "insights", "tldrs", "usage"].includes(n) && !dataLoaded)) return;
+  fm.writeString(P(n), JSON.stringify(v));
+};
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
@@ -194,11 +213,23 @@ const settings = Object.assign(
     lastRefresh: 0 },                                                           // internal state
   await load("settings", {})
 );
-let stocks = await load("stocks", []);            // [{ s, name, exch, list: "own" | "watch", sh, cost, added }]
-let market = await load("market", {});            // per symbol: price, prev, pts, f (fundamentals), prof, news, crowd
-let insights = await load("insights", { briefing: null, stories: {}, ideas: null });
-let tldrs = await load("tldrs", {});              // TL;DR per headline link, newest 150 kept   // AI output, with provider and time
-insights.stories = insights.stories || {};
+const settingsOk = !loadIssues.includes("settings");   // settings that were never read are never saved over
+// Stocks, prices, AI texts and usage are read in loadData(): the app shows its first screen before reading them,
+// because iCloud can be slow to hand files over (a blank screen when opened from the widget; BlogPulse 1.9.x).
+let stocks = [];        // [{ s, name, exch, list: "own" | "watch", sh, cost, added }]
+let market = {};        // per symbol: price, prev, pts, f (fundamentals), prof, news, crowd
+let insights = { briefing: null, stories: {}, ideas: null };   // AI output, with provider and time
+let tldrs = {};         // TL;DRs and news stories by headline link, newest 150 kept
+async function loadData() {
+  loadIssues.length = 0;
+  stocks = await load("stocks", []);
+  market = await load("market", {});
+  insights = await load("insights", { briefing: null, stories: {}, ideas: null });
+  insights.stories = insights.stories || {};
+  tldrs = await load("tldrs", {});
+  usage = await load("usage", usage);
+  dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
+}
 
 function saveAll() {
   write("stocks", stocks); write("market", market); write("insights", insights); write("settings", settings);
@@ -528,7 +559,7 @@ function removeKey(p) {
 }
 
 // Token usage, counted from what the provider reports, per provider, model, feature and local day.
-let usage = await load("usage", { since: Date.now(), p: {} });
+var usage = { since: Date.now(), p: {} };   // read in loadData()
 const dayKey = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function recordUsage(provider, model, feature, tin, tout, chars = 0) {   // chars: text sent for speech
@@ -1291,6 +1322,11 @@ async function handle(m) {
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
       catch (e) { return call("__done", m.req, false, String(e.message || e)); }
     case "speak": if (m.text) Speech.speak(String(m.text).slice(0, 8000)); return;   // fallback when the page can't speak
+    case "startlog": {
+      let txt = "";
+      try { txt = FileManager.local().readString(LOG_PATH).split("\n").slice(-40).join("\n"); } catch (e) {}
+      return call("__done", m.req, true, txt);
+    }
     case "openlink": if (/^https:\/\//i.test(String(m.v || ""))) await Safari.openInApp(m.v, false); return;
     case "openurl":   // Settings › Built with: only the blueprints repository opens from here
       if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
@@ -1821,6 +1857,8 @@ function clientApp() {
       <h3 class="sec">Updates</h3>
       <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have Stockit ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
+      <div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Stockit opened</small></div><button class="sm" data-act="startlog">Show</button></div>
+      <pre id="startlog" class="startlog" hidden></pre>
       ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.map(field).join("")}`).join("")}
       <div class="aic-btns cfg-foot"><span class="note">${changed ? changed + " setting" + (changed === 1 ? "" : "s") + " changed" : "All settings are at their original values"}</span>
         ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
@@ -2329,6 +2367,12 @@ function clientApp() {
         if (secArmed === v) { secArmed = null; send("secret-remove", { v }); }
         else { secArmed = v; renderCfg(); setTimeout(() => { if (secArmed === v) { secArmed = null; renderCfg(); } }, 3500); }
         break;
+      case "startlog": {
+        const pre = $("#startlog");
+        if (!pre.hidden) { pre.hidden = true; t.textContent = "Show"; break; }
+        send("startlog", {}, (ok, txt) => { pre.textContent = txt || "Nothing logged yet."; pre.hidden = false; t.textContent = "Hide"; });
+        break;
+      }
       case "updcheck": { const m = $("#updmsg"); if (m) m.textContent = "Checking…"; send("updcheck", {}, (ok, msg) => { const mm = $("#updmsg"); if (mm) mm.textContent = msg; }); break; }
       case "openurl": send("openurl", { v }); break;
       case "aiopen": aiOpen = true; renderAI(); break;
@@ -2703,6 +2747,11 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .tl-listen{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 18px}
 .primary.block{display:block;width:100%;text-align:center;padding:13px 16px;margin:6px 0 4px}
 .err{color:var(--danger)}
+.booting{display:flex;align-items:center;justify-content:center;gap:10px;padding:80px 20px;color:var(--muted);font-size:calc(14px * var(--ts))}
+.booting.note{flex-direction:column;text-align:center;color:var(--ink-2);padding:60px 24px}
+.booting.note b{font-size:calc(18px * var(--ts));color:var(--ink)}
+.booting.note pre,.startlog{max-width:100%;overflow:auto;text-align:left;font:12px/1.45 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px;color:var(--ink-2);white-space:pre-wrap;-webkit-user-select:text;user-select:text}
+.startlog{margin:8px 0;max-height:260px}
 .busy-dot{width:15px;height:15px;flex:none;border-radius:50%;border:2px solid var(--rule);border-top-color:var(--signal);animation:bdspin .8s linear infinite}
 @keyframes bdspin{to{transform:rotate(360deg)}}
 /* Read aloud (as in BlogPulse) */
@@ -2766,7 +2815,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
     <button class="icon rf" data-act="refresh" aria-label="Refresh prices and news">${REFRESH_SVG}</button></div></div>
   <nav id="tabs" class="tabs" aria-label="Lists"></nav>
 </header>
-<main id="main"></main>
+<main id="main"><div class="booting" role="status"><span class="busy-dot"></span>Loading your stocks…</div></main>
 <p class="ver">Stockit v${VERSION}</p>
 <div id="detail" class="sheet" aria-label="Stock"></div>
 <div id="addsheet" class="sheet" aria-label="Add stocks"></div>
@@ -2791,8 +2840,32 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   setTimeout(gone, 2900);               // out of the page once the CSS fade is done
 })();
 window.__LOGO = ${safeJSON(LOGO_SVG)};
-window.__INIT = ${safeJSON(clientState())};
-(${clientApp.toString()})();</script>
+// The page goes on screen first; Scriptable hands over the data once it has read it (as in BlogPulse 1.9.2).
+window.__parts = [];
+window.__bootNote = function (title, detail) {
+  var b = document.querySelector(".booting"); if (!b) return;
+  b.className = "booting note";
+  b.innerHTML = "<b></b><span></span>" + (detail ? "<pre></pre>" : "");
+  b.querySelector("b").textContent = title;
+  b.querySelector("span").textContent = "Close Stockit and open it again. If it keeps happening, run the installer once more.";
+  if (detail) b.querySelector("pre").textContent = detail;
+};
+setTimeout(function () { if (!window.__booted) window.__bootNote("Still loading…"); }, 25000);
+document.addEventListener("visibilitychange", function () {   // coming back into view: redraw
+  if (document.visibilityState !== "visible") return;
+  var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight; d.style.transform = "";
+});
+window.__boot = function (st) {
+  if (window.__booted) return;
+  if (!st.stocks || !st.stocks.length) st.stocks = [].concat.apply([], window.__parts);
+  window.__parts = [];
+  window.__booted = true; window.__INIT = st;
+  requestAnimationFrame(function () {   // make WebKit draw again once the stocks are in (helps if the window came up blank)
+    var d = document.documentElement; d.style.transform = "translateZ(0)"; void d.offsetHeight;
+    requestAnimationFrame(function () { d.style.transform = ""; });
+  });
+  (${clientApp.toString()})();
+};</script>
 </body></html>`;
 
 // ---------- home-screen widget: Stockit's content for the shared frame below ----------
@@ -3085,24 +3158,86 @@ async function runWidget() {
 // ───────── end of Widget ─────────
 
 // ---------- run ----------
-async function main() {
-  buildWebView();
-  await wv.loadHTML(buildHTML());
-  const presented = wv.present(true);
-  if (!updateChecked) { updateChecked = true; checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }); }
-  if (stocks.length && settings.refreshOnOpen !== false && Date.now() - (settings.lastRefresh || 0) > cfg("pricesFreshMin") * 60e3)
-    runRefresh(false).catch(e => toast(String(e.message || e)));
-  else if (settings.ai && aiKey() && briefingDue()) runBriefing(false);
-  await presented;
-  saveAll();
-  saveWidget(widgetSnapshot());
+// ---------- run ----------
+// A run marks itself as open while its window is on screen. A new run waits at most 1.5 s for an older
+// window to close, then opens anyway (as BlogPulse 1.9.1): quick taps on the widget don't stack up copies.
+const lockFm = FileManager.local();
+const RUN_LOCK = lockFm.joinPath(lockFm.temporaryDirectory(), APP_ID + '-running');
+let lockTimer = null;
+const lockAge = () => { try { return lockFm.fileExists(RUN_LOCK) ? Date.now() - Number(lockFm.readString(RUN_LOCK)) : Infinity; } catch (e) { return Infinity; } };
+const pause = ms => new Promise(r => Timer.schedule(ms, false, r));
+async function waitForOtherWindow() { for (let waited = 0; lockAge() < 2500 && waited < 1500; waited += 300) await pause(300); }
+function holdLock() {
+  const beat = () => { try { lockFm.writeString(RUN_LOCK, String(Date.now())); } catch (e) {} };
+  beat(); lockTimer = Timer.schedule(1000, true, beat);
+}
+function releaseLock() {
+  if (lockTimer) { lockTimer.invalidate(); lockTimer = null; }
+  try { if (lockFm.fileExists(RUN_LOCK)) lockFm.remove(RUN_LOCK); } catch (e) {}
+}
+// Talks to the page with a time limit, so a stuck page can't stall the app.
+const ev = (js, ms = 20000) => Promise.race([wv.evaluateJavaScript(js, false), pause(ms).then(() => { throw new Error("the page didn't respond in " + ms / 1000 + " s"); })]);
+
+async function bootApp(isClosed) {
+  const t0 = Date.now();
+  startLog(`Stockit ${VERSION}: reading data`);
+  await loadData();
+  startLog(`data read in ${((Date.now() - t0) / 1000).toFixed(1)} s: ${stocks.length} stocks${loadIssues.length ? "; missing: " + loadIssues.join(", ") : ""}`);
+  if (isClosed()) return;
+  const st = clientState(), list = st.stocks;
+  st.stocks = [];
+  for (let i = 0; i < list.length; i += 6) await ev(`window.__parts.push(${safeJSON(list.slice(i, i + 6))})`);   // in pieces: one huge message can stall WebKit
+  await ev(`window.__boot(${safeJSON(st)})`);
+  let seen = "";
+  try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight`, 5000); } catch (e) { seen = String(e.message || e); }
+  startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
+  if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen Stockit.");
+  // Deferred work, once the first screen is drawn: prices and news, then updates, then the widget's icon.
+  Timer.schedule(700, false, () => {
+    if (isClosed() || !dataLoaded) return;
+    if (stocks.length && settings.refreshOnOpen !== false && Date.now() - (settings.lastRefresh || 0) > cfg("pricesFreshMin") * 60e3)
+      runRefresh(false).catch(e => toast(String(e.message || e)));
+    else if (settings.ai && aiKey() && briefingDue()) runBriefing(false);
+  });
+  Timer.schedule(3500, false, () => {
+    if (isClosed() || updateChecked) return;
+    updateChecked = true;
+    checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); });
+  });
+  Timer.schedule(6000, false, () => { widgetIcon(); });
 }
 
-// Settings and data are loaded at the top of the script (load("settings")), before every branch: app and widget runs both use the saved choices.
+async function main() {
+  await waitForOtherWindow();
+  buildWebView();
+  // A page built before its window is on screen can stay blank on some iPhones (the page runs, nothing is drawn),
+  // most often when opened from the widget. So: an empty dark window first, then the real page built inside it.
+  await wv.loadHTML('<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:#0E1116"></body></html>');
+  const presented = wv.present(true);
+  holdLock();
+  await pause(300);                          // let the window finish appearing
+  startLog("window on screen");
+  await Promise.race([wv.loadHTML(buildHTML()), pause(15000)]);   // the launch screen, drawn on screen
+  let closed = false;
+  presented.then(() => { closed = true; releaseLock(); });
+  bootApp(() => closed).catch(e => {         // runs beside the window: closing it never waits on this
+    startLog("start-up failed: " + (e.message || e));
+    let log = "";
+    try { log = FileManager.local().readString(LOG_PATH).split("\n").slice(-12).join("\n"); } catch (x) {}
+    if (!closed) wv.evaluateJavaScript(`window.__bootNote("Stockit couldn't open", ${safeJSON(log)})`, false).catch(() => {});
+  });
+  await presented;
+  closed = true;
+  releaseLock();
+  saveAll();                                 // write() skips data that was never read
+  if (dataLoaded) saveWidget(widgetSnapshot());
+}
+
+// Settings are loaded at the top of the script (load("settings")), before every branch; data is read in each branch.
 if (config.runsInWidget || config.runsInAccessoryWidget) {
+  await loadData();
   await runWidget();             // never builds or presents a WebView, Alert or QuickLook
 } else {
-  widgetIcon();                  // caches the logo tile for the widget, in the background
   await main();
 }
 Script.complete();
