@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Check my portfolio: screenshots of your broker's app compared with Stockit, every difference a suggestion you apply or ignore
  *  - All your money in one currency of your choice (euros, dollars, …), in the app and the widget
  *  - Charts from one day to five years; touch to see the price at any moment
  *  - Whether each stock's market is open now, and a Markets tab with every market's opening and closing countdown
@@ -26,7 +27,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.7.0';
+const VERSION = '1.8.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -81,6 +82,11 @@ const CONFIG = [
     { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 12000, min: 2000, max: 30000, step: 1000 },
     { k: "ideasCount", label: "Ideas per request", unit: "ideas", def: 5, min: 3, max: 10, step: 1 },
     { k: "ideaThemes", label: "Themes for ideas", help: "Edited in the Ideas tab; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
+  ]],
+  ["Portfolio check", [
+    { k: "checkPriceTol", label: "Flag a price difference from", help: "Between your screenshot and the price Stockit has; screenshots are often a little older", unit: "%", def: 5, min: 1, max: 30, step: 1 },
+    { k: "checkCostTol", label: "Flag an average price difference from", unit: "%", def: 1, min: 0.1, max: 10, step: 0.1 },
+    { k: "checkMaxShots", label: "Screenshots per check", unit: "screenshots", def: 6, min: 1, max: 10, step: 1 },
   ]],
   ["Widget", [
     { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 30, min: 15, max: 240, step: 15 },
@@ -1129,6 +1135,145 @@ async function aiSpeech(text) {
   return data.toBase64String();
 }
 
+// ---------- Check my portfolio: your broker's screenshots compared with Stockit ----------
+// ✦ AI reads the positions; Stockit matches them with your stocks and lists every difference as a suggestion.
+// Nothing changes until you tap Apply on a suggestion.
+let checkBusy = false, check = null;
+function toJPEG(img, maxSide = 1600) {
+  const s = img.size, k = Math.min(1, maxSide / Math.max(s.width, s.height));
+  const dc = new DrawContext();
+  dc.size = new Size(Math.round(s.width * k), Math.round(s.height * k)); dc.respectScreenScale = false;
+  dc.drawImageInRect(img, new Rect(0, 0, dc.size.width, dc.size.height));
+  return Data.fromJPEG(dc.getImage()).toBase64String();
+}
+async function pickScreenshots(max) {
+  const out = [];
+  while (out.length < max) {
+    let img;
+    try { img = await Photos.fromLibrary(); } catch (e) { break; }   // cancelled
+    if (!img) break;
+    out.push(toJPEG(img));
+    if (out.length >= max) break;
+    const a = new Alert();
+    a.title = `${out.length} screenshot${out.length === 1 ? "" : "s"} chosen`;
+    a.message = "If your portfolio takes more than one screen, add the next screenshot too.";
+    a.addAction("Check these"); a.addAction("Add another screenshot"); a.addCancelAction("Cancel");
+    const r = await a.present();
+    if (r === -1) return [];
+    if (r === 0) break;
+  }
+  return out;
+}
+async function ensureRate(cur) {   // a rate to your currency for a screenshot's currency, if Stockit doesn't have it yet
+  const [c] = normCur(cur), home = homeCur();
+  if (!c || c === home || fxRates[c + home]) return;
+  try { const { meta, pts } = await yChart(`${c}${home}=X`, "5d", "1d"); const q = priceFrom(meta, pts); if (q.price) fxRates[c + home] = { rate: q.price, prev: q.prev || q.price, at: Date.now() }; } catch (e) {}
+}
+function convertCur(v, from, to) {   // between any two currencies, through yours; null when a rate is missing
+  if (v == null || !isFinite(v)) return null;
+  const [f, kf] = normCur(from), [t, kt] = normCur(to);
+  if (f === t) return v / kf * kt;
+  const rf = fxRate(f), rt = fxRate(t);
+  return rf != null && rt != null ? v / kf * rf / rt * kt : null;
+}
+const nameKey = n => cleanName(n).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function matchPosition(p, pool2) {
+  const sym = String(p.symbol || "").toUpperCase().replace(/^\$/, "").trim(), base = s2 => String(s2).split(/[.:\s-]/)[0];
+  let x = sym && (pool2.find(y => y.s === sym) || pool2.find(y => base(y.s) === base(sym)));
+  if (!x && p.name) {
+    const n = nameKey(p.name), first = n.split(" ")[0];
+    x = pool2.find(y => { const yn = nameKey((market[y.s] || {}).name || y.name || ""); return yn && (yn === n || (first.length > 2 && yn.split(" ")[0] === first)); });
+  }
+  return x || null;
+}
+async function runCheck() {
+  if (checkBusy) return;
+  if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
+  const shots = await pickScreenshots(cfg("checkMaxShots"));
+  if (!shots.length) return;
+  checkBusy = true; call("onBusy", "check", true);
+  try {
+    const o = parseJSON(await aiCall("You read brokerage and portfolio screenshots precisely, digit by digit. Reply with JSON only.",
+      `These ${shots.length} screenshot${shots.length === 1 ? "" : "s"} show one investment portfolio, possibly scrolled across several screens: list each position once, even if it appears twice.
+For every position give exactly what is shown: the ticker if shown (else null), the name as shown, the ISIN if shown, the number of shares or units, the average purchase price per share, the current price per share, the current market value, and the currency of those prices.
+Use null for anything not shown. Never calculate or guess a number that isn't on screen. Read decimal commas correctly (1.234,56 is one thousand two hundred thirty-four point fifty-six).
+Also give the broker or app name and the portfolio total if they are shown.
+JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"NVDA","name":"NVIDIA Corp","isin":null,"shares":30,"avgPrice":96.0,"price":143.61,"value":4308.3,"currency":"USD"}]}`,
+      3000, "check", settings.aiProvider, shots));
+    const num2 = v => {   // numbers as shown: 1,234.56 and 1.234,56 both read right
+      if (v == null || v === "") return null;
+      if (typeof v === "number") return isFinite(v) ? v : null;
+      let t = String(v).replace(/[^\d.,-]/g, "");
+      const lc = t.lastIndexOf(","), ld = t.lastIndexOf(".");
+      if (lc > ld && !(ld === -1 && /,\d{3}$/.test(t) && t.split(",").length > 1 && !/,\d{1,2}$/.test(t))) t = t.replace(/\./g, "").replace(",", ".");
+      else t = t.replace(/,/g, "");
+      const k = parseFloat(t); return isFinite(k) ? k : null;
+    };
+    const pos = (Array.isArray(o.positions) ? o.positions : []).map(p => ({ symbol: p.symbol ? String(p.symbol).trim() : "", name: String(p.name || "").trim(), isin: p.isin || "",
+      shares: num2(p.shares), avgPrice: num2(p.avgPrice), price: num2(p.price), value: num2(p.value), currency: p.currency ? String(p.currency).trim() : "" })).filter(p => p.symbol || p.name);
+    if (!pos.length) { toast("No positions found in those screenshots"); return; }
+    for (const c of new Set(pos.map(p => p.currency).filter(Boolean))) await ensureRate(c);
+    const items = [], used = new Set(), pTol = cfg("checkPriceTol"), cTol = cfg("checkCostTol");
+    let n = 0;
+    for (const p of pos) {
+      const id = "c" + (n++);
+      const x = matchPosition(p, stocks.filter(y => !used.has(y.s)));
+      if (x) {
+        used.add(x.s);
+        const m = market[x.s] || {}, cur = m.cur || p.currency || "USD", pc = p.currency || cur;
+        const shotPrice = convertCur(p.price, pc, cur), shotCost = convertCur(p.avgPrice, pc, cur);
+        const gap = shotPrice != null && m.price ? (shotPrice / m.price - 1) * 100 : null;
+        const diffs = [];
+        if (x.list !== "own") diffs.push("watch");
+        if (p.shares != null && Math.abs(p.shares - (x.sh || 0)) > 1e-6) diffs.push("shares");
+        if (shotCost != null && (!x.cost || Math.abs(shotCost / x.cost - 1) * 100 > cTol)) diffs.push("cost");
+        if (gap != null && Math.abs(gap) > pTol) diffs.push("price");
+        items.push({ id, kind: x.list !== "own" ? "watch" : diffs.length ? "differs" : "match", s: x.s, name: m.name || x.name || x.s, cur, shot: p, shotCur: pc,
+          mine: { sh: x.sh || 0, cost: x.cost || 0, price: m.price != null ? m.price : null }, diffs, gap,
+          suggest: { sh: p.shares != null ? p.shares : x.sh || 0, cost: shotCost != null ? round(shotCost, shotCost < 10 ? 4 : 2) : x.cost || 0 }, converted: normCur(pc)[0] !== normCur(cur)[0] });
+      } else {
+        const r = await resolveSymbol(p.symbol || p.name).catch(() => null);
+        let cur = p.currency || "USD", price = null;
+        if (r) { try { const { meta, pts } = await yChart(r.s, "5d", "1d"); cur = meta.currency || cur; price = priceFrom(meta, pts).price; } catch (e) {} }
+        const shotPrice = convertCur(p.price, p.currency || cur, cur), shotCost = convertCur(p.avgPrice, p.currency || cur, cur);
+        const gap = shotPrice != null && price ? (shotPrice / price - 1) * 100 : null;
+        items.push({ id, kind: "missing", s: r ? r.s : null, name: (r && r.name) || p.name || p.symbol, cur, shot: p, shotCur: p.currency || cur, yahooPrice: price, gap,
+          diffs: gap != null && Math.abs(gap) > pTol ? ["price"] : [], suggest: { sh: p.shares || 0, cost: shotCost != null ? round(shotCost, shotCost < 10 ? 4 : 2) : 0 }, converted: !!p.currency && normCur(p.currency)[0] !== normCur(cur)[0] });
+      }
+    }
+    for (const x of stocks.filter(y => y.list === "own" && !used.has(y.s)))
+      items.push({ id: "c" + (n++), kind: "extra", s: x.s, name: (market[x.s] || {}).name || x.name || x.s, cur: (market[x.s] || {}).cur || "", mine: { sh: x.sh || 0, cost: x.cost || 0, price: (market[x.s] || {}).price }, diffs: [] });
+    const tot = totals()[0];
+    check = { at: Date.now(), shots: shots.length, broker: o.broker ? String(o.broker).slice(0, 60) : "", n: pos.length, items,
+      total: num2(o.total), totalCur: o.totalCurrency ? String(o.totalCurrency) : "", mineTotal: tot ? { v: tot.value, cur: tot.cur } : null,
+      totalInMine: tot && num2(o.total) != null ? convertCur(num2(o.total), o.totalCurrency || tot.cur, tot.cur) : null, by: settings.aiProvider };
+    push();
+  } catch (e) { toast("Screenshots not read: " + String(e.message || e).slice(0, 90)); }
+  finally { checkBusy = false; call("onBusy", "check", false); }
+}
+async function applyCheck(m) {
+  const it = check && check.items.find(i => i.id === m.id);
+  if (!it || it.resolved) return;
+  const n = v => { const k = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isFinite(k) && k >= 0 ? k : 0; };
+  const x = it.s && stocks.find(y => y.s === it.s);
+  if (m.k === "update" || m.k === "own") {
+    if (!x) return;
+    x.sh = n(m.sh); x.cost = n(m.cost); if (x.sh > 0) x.list = "own";
+    it.resolved = m.k === "own" ? "Moved to your portfolio" : "Updated";
+  } else if (m.k === "add") {
+    if (!it.s) return;
+    const r = await addStocks([{ s: it.s, name: it.name, sh: n(m.sh), cost: n(m.cost) }], "own");
+    it.resolved = r.added.length || r.updated.length ? "Added to your portfolio" : "Couldn't add";
+  } else if (m.k === "watch") {
+    if (!x) return; x.list = "watch"; it.resolved = "Moved to your watchlist";
+  } else if (m.k === "remove") {
+    if (!x) return;
+    stocks = stocks.filter(y => y.s !== it.s); delete market[it.s]; delete insights.stories[it.s];
+    it.resolved = "Removed";
+  } else if (m.k === "ignore") it.resolved = "Ignored";
+  saveAll(); push(); saveWidget(widgetSnapshot());
+}
+
 // ---------- in-app updates (app-blueprints · in-app-updates) ----------
 // Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
 function cmpVer(a, b) {
@@ -1245,7 +1390,8 @@ function clientState() {
     fx: (() => { const home = homeCur(), rates = {};
       for (const [k, r] of Object.entries(fxRates)) if (k.endsWith(home) && k.length === home.length + 3) rates[k.slice(0, 3)] = { rate: r.rate, prev: r.prev, at: r.at };
       return { home, choice: settings.homeCur || "auto", rates, curs: HOME_CURS }; })(),
-    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy] },
+    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy },
+    check,
     ai: {
       provider: settings.aiProvider,
       keys:  Object.fromEntries(Object.keys(PROVIDERS).map(p => [p, maskKey(keyFor(p))])),
@@ -1403,6 +1549,9 @@ async function handle(m) {
     case "story": return runStory(m.s);
     case "briefing": return runBriefing(true);
     case "ideas": return runIdeas();
+    case "checkrun": return runCheck();
+    case "checkapply": return applyCheck(m);
+    case "checkclear": check = null; return push();
     case "preview": return openPreview(m.s);
     case "addpreview": {   // from a stock's page opened from Ideas: onto your watchlist or portfolio
       if (stocks.some(y => y.s === m.s)) return;
@@ -1511,16 +1660,16 @@ function clientApp() {
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
   let newsOpen = null; const tl = {};
-  let previewWait = null, themeText = "", ideaExplain = null;
+  let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null; const ckEdit = {};
   let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", check: "Portfolio checks", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
-  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
+  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
 
   // ---- appearance (app-blueprints · settings, Step 3) ----
@@ -1877,7 +2026,7 @@ function clientApp() {
     const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null], ["markets", "Markets", null], ["ideas", S.settings.hasKey ? "✦ Ideas" : "Ideas", null]];
     $("#tabs").innerHTML = t.map(([k, l, n]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
-  function renderAll() { render(); renderDetail(); renderNews(); renderAdd(); renderAI(); renderCfg(); }
+  function renderAll() { render(); renderDetail(); renderNews(); renderCheck(); renderAdd(); renderAI(); renderCfg(); }
   function render() {
     applyLook(); renderStatus(); renderTabs();
     $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : tab === "markets" ? marketsHTML() : listHTML();
@@ -1899,7 +2048,7 @@ function clientApp() {
       <h2>Start with the stocks you own or follow</h2><p>Search by name or ticker, paste a list, import your broker's CSV${S.settings.hasKey ? ", or snap a screenshot of your Stocks app watchlist" : ""}.</p>
       <button class="primary" data-act="addopen">Add stocks</button></section>`;
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
-    const head = tab === "own" ? summaryHTML(items) + briefHTML() : "";
+    const head = tab === "own" ? summaryHTML(items) + (items.length ? `<button class="checkrow" data-act="checkopen"><span>✓ Check against your broker</span><small>Compare screenshots of your broker's app with Stockit</small><span class="chev" aria-hidden="true">›</span></button>` : "") + briefHTML() : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = (tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
@@ -2667,7 +2816,58 @@ function clientApp() {
       <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button><span class="note">${voices.length} voices on this ${/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone"}</span></div>
       <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
   }
-  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || addOpen || cfgOpen || aiOpen)); }
+  // ---- Check my portfolio: screenshots of your broker's app, compared with Stockit; you apply each change ----
+  function renderCheck() {
+    const el = $("#checksheet"), keep = el.scrollTop;
+    el.classList.toggle("open", checkOpen); lockBody();
+    if (!checkOpen) return;
+    const C = S.check, bz = isBusy("check");
+    if (C && C.at !== renderCheck.at) { for (const k of Object.keys(ckEdit)) delete ckEdit[k]; renderCheck.at = C.at; }   // a new check: fresh suggestions
+    const head = `<div class="sh-head"><h2>Check my portfolio</h2><button class="link" data-act="checkclose">Done</button></div>`;
+    if (!S.settings.hasKey) { el.innerHTML = head + `<div class="sh-body"><p class="muted">Stockit reads your broker's screenshots with ✦ AI. Add a Claude or OpenAI key in <button class="link small" data-act="cfgopen">Settings › AI settings</button> to check your portfolio.</p></div>`; return; }
+    const intro = `<p class="muted">Take screenshots of your portfolio in your broker's or bank's app, with each position's shares and prices showing. Stockit reads them with ✦ AI and compares them with your portfolio here. <b>Nothing changes until you tap a button on a suggestion.</b></p>
+      <div class="aic-btns"><button class="primary" data-act="checkrun" ${bz ? "disabled" : ""}>${bz ? "Reading your screenshots…" : C ? "Check new screenshots" : "Choose screenshots"}</button>${C && !bz ? `<button class="sm" data-act="checkclear">Clear results</button>` : ""}</div>`;
+    if (!C) { el.innerHTML = head + `<div class="sh-body">${intro}</div>`; return; }
+    const by = k => C.items.filter(i => i.kind === k), open = i => !i.resolved;
+    const diff = by("differs").concat(by("watch")), miss = by("missing"), extra = by("extra"), ok = by("match");
+    const todo = C.items.filter(i => i.kind !== "match" && open(i)).length;
+    const m2 = (v, c2) => v == null ? "—" : money(v, c2);
+    const fld = (it, f, label, val, c2) => `<label class="ck-f"><span>${label}${c2 ? ` (${esc(c2)})` : ""}</span><input class="ck-in" inputmode="decimal" data-id="${it.id}" data-f="${f}" value="${esc(ckEdit[it.id] && ckEdit[it.id][f] != null ? ckEdit[it.id][f] : val != null ? +(+val).toFixed(4) : "")}"></label>`;
+    const done = it => it.resolved ? `<p class="ck-done">✓ ${esc(it.resolved)}</p>` : "";
+    const gapNote = it => it.gap != null && it.diffs.includes("price") ? `<p class="ck-warn">The price on your screenshot is ${pct(it.gap, 1)} ${it.gap > 0 ? "above" : "below"} ${it.kind === "missing" ? "Yahoo's" : "Stockit's"}. The screenshot may be older, in another currency, or for a different listing of the same company; check the shares and average price below.</p>` : "";
+    const rows = it => `<table class="ck-t"><tr><th></th><th>${it.kind === "missing" ? "Yahoo" : "Stockit"}</th><th>Screenshot</th></tr>
+      <tr class="${it.diffs.includes("shares") ? "bad" : ""}"><td>Shares</td><td>${it.mine ? nf(it.mine.sh, it.mine.sh % 1 ? 4 : 0) : "—"}</td><td>${it.shot && it.shot.shares != null ? nf(it.shot.shares, it.shot.shares % 1 ? 4 : 0) : "—"}</td></tr>
+      <tr class="${it.diffs.includes("cost") ? "bad" : ""}"><td>Average price</td><td>${it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—"}</td><td>${it.shot ? m2(it.shot.avgPrice, it.shotCur) : "—"}</td></tr>
+      <tr class="${it.diffs.includes("price") ? "bad" : ""}"><td>Price now</td><td>${m2(it.mine ? it.mine.price : it.yahooPrice, it.cur)}</td><td>${it.shot ? m2(it.shot.price, it.shotCur) : "—"}${it.gap != null ? ` <small class="${Math.abs(it.gap) > (S.cfg.checkPriceTol || 5) ? "down" : "muted"}">${pct(it.gap, 1)}</small>` : ""}</td></tr>
+      ${it.shot && it.shot.value != null ? `<tr><td>Value</td><td>${it.mine && it.mine.price != null ? m2(it.mine.sh * it.mine.price, it.cur) : "—"}</td><td>${m2(it.shot.value, it.shotCur)}</td></tr>` : ""}</table>`;
+    const card = it => {
+      const head2 = `<div class="ck-h"><b>${esc(it.s || it.shot.symbol || "?")}</b><small>${esc(it.name || "")}</small></div>`;
+      if (it.kind === "differs" || it.kind === "watch") {
+        const what = it.kind === "watch" ? "On your watchlist, but your screenshot shows you own it." : `Different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "shares", cost: "average price", price: "price" }[d])).join(", ")}.`;
+        return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">${what}</p>${rows(it)}${gapNote(it)}
+          ${it.resolved ? done(it) : `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}
+          <div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="${it.kind === "watch" ? "own" : "update"}">${it.kind === "watch" ? "Move to portfolio" : "Apply these"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep Stockit's</button></div>`}</article>`;
+      }
+      if (it.kind === "missing") return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">On your screenshot, not in Stockit.${it.s ? "" : " Stockit couldn't find it on Yahoo Finance."}</p>${rows(it)}${gapNote(it)}
+          ${it.resolved ? done(it) : it.s ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}
+          <div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="add">Add to portfolio</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`
+            : `<div class="aic-btns"><button class="sm primary" data-act="checkfind" data-v="${esc(it.shot.symbol || it.name)}">Find it</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`}</article>`;
+      return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">In your Stockit portfolio (${nf(it.mine.sh, it.mine.sh % 1 ? 4 : 0)} shares), not on your screenshots. If your screenshots show your whole portfolio, you may have sold it.</p>
+        ${it.resolved ? done(it) : `<div class="aic-btns"><button class="sm danger ${ckArmed === it.id ? "armed" : ""}" data-act="checkapply" data-v="${it.id}" data-k="remove">${ckArmed === it.id ? "Confirm" : "Remove"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="watch">Move to watchlist</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep</button></div>`}</article>`;
+    };
+    const sec = (title, list, sub) => list.length ? `<h3 class="sec">${title} <span class="n">${list.length}</span></h3>${sub ? `<p class="note">${sub}</p>` : ""}${list.map(card).join("")}` : "";
+    const tot = C.total != null ? `<p class="ck-tot">Total on your screenshot ${money(C.total, C.totalCur || (C.mineTotal || {}).cur)}${C.mineTotal ? ` · in Stockit ${money(C.mineTotal.v, C.mineTotal.cur)}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : "";
+    el.innerHTML = head + `<div class="sh-body">${intro}
+      <section class="ck-sum"><b>${todo ? `${todo} thing${todo === 1 ? "" : "s"} to review` : "Everything matches ✓"}</b>
+        <small>${C.n} position${C.n === 1 ? "" : "s"} read from ${C.shots} screenshot${C.shots === 1 ? "" : "s"}${C.broker ? " (" + esc(C.broker) + ")" : ""} by ✦ ${PN[C.by] || esc(C.by)}, ${rel(C.at)} · ${ok.length} match</small>${tot}</section>
+      ${sec("Differs", diff, "Change Stockit to what your broker shows, or keep Stockit's numbers.")}
+      ${sec("On your screenshots, not in Stockit", miss)}
+      ${sec("In Stockit, not on your screenshots", extra, "Only if your screenshots show your whole portfolio.")}
+      ${ok.length ? `<details class="ck-ok"><summary>Matching <span class="n">${ok.length}</span></summary>${ok.map(i => `<p>✓ <b>${esc(i.s)}</b> ${nf(i.mine.sh, i.mine.sh % 1 ? 4 : 0)} shares${i.mine.cost ? " at " + money(i.mine.cost, i.cur) : ""}</p>`).join("")}</details>` : ""}
+      <p class="note">✦ AI can misread a screenshot. Check each suggestion before you apply it. Not financial advice.</p></div>`;
+    el.scrollTop = keep;
+  }
+  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen)); }
 
   // ---- interactions ----
   const shareText = (title, by, body) => `${title}\n\n${String(body || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")}\n\n✦ Written by ${PN[by] || by} in Stockit. Not financial advice.`;
@@ -2677,7 +2877,7 @@ function clientApp() {
     searching = true; results = null; renderAdd(); send("search", { q: v.trim() });
   }
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "q") { e.preventDefault(); e.target.blur(); find(); } });
-  document.addEventListener("input", e => { if (e.target.id === "themeIn") themeText = e.target.value; if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
+  document.addEventListener("input", e => { if (e.target.classList && e.target.classList.contains("ck-in")) { const id = e.target.dataset.id; ckEdit[id] = Object.assign(ckEdit[id] || {}, { [e.target.dataset.f]: e.target.value }); return; } if (e.target.id === "themeIn") themeText = e.target.value; if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
   document.addEventListener("click", e => {
     if (e.target.closest("select, option, input, textarea, summary")) return;   // form controls handle themselves
     const t = e.target.closest("[data-act]");
@@ -2719,6 +2919,19 @@ function clientApp() {
         if (stratArmed !== v) { stratArmed = v; render(); setTimeout(() => { if (stratArmed === v) { stratArmed = null; render(); } }, 3500); break; }
         stratArmed = null; send("stratdelete", { v }); break;
       case "mktopen": tab = v; render(); break;
+      case "checkopen": checkOpen = true; renderCheck(); $("#checksheet").scrollTop = 0; break;
+      case "checkclose": checkOpen = false; renderCheck(); break;
+      case "checkrun": send("checkrun", {}); break;
+      case "checkclear": send("checkclear", {}); break;
+      case "checkapply": {
+        const it = S.check && S.check.items.find(i => i.id === v), k = t.dataset.k;
+        if (!it) break;
+        if (k === "remove" && ckArmed !== v) { ckArmed = v; renderCheck(); setTimeout(() => { if (ckArmed === v) { ckArmed = null; renderCheck(); } }, 3500); break; }
+        ckArmed = null;
+        const e2 = ckEdit[v] || {}, sh = e2.sh != null ? e2.sh : it.suggest && it.suggest.sh, cost = e2.cost != null ? e2.cost : it.suggest && it.suggest.cost;
+        send("checkapply", { id: v, k, sh, cost }); break;
+      }
+      case "checkfind": checkOpen = false; renderCheck(); addOpen = true; results = null; renderAdd(); { const q = $("#q"); if (q) { q.value = v; } } break;
       case "ideaexplain": ideaExplain = ideaExplain === v ? null : v; render(); break;
       case "gotab": cfgOpen = false; renderCfg(); tab = v; send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
       case "preview": openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
@@ -3192,6 +3405,29 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .xtip b{font-size:calc(15px * var(--ts))} .xtip small{flex-basis:100%;font-size:calc(11.5px * var(--ts));opacity:.8}
 .xtip .up{color:#86efac} .xtip .down{color:#fca5a5}
 .rng button{padding-left:4px;padding-right:4px}
+/* Check my portfolio */
+#checksheet{z-index:12}
+.checkrow{display:flex;flex-wrap:wrap;align-items:center;width:100%;text-align:left;gap:2px 8px;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:11px 14px;margin:0 0 12px}
+.checkrow span:first-child{font-weight:700;color:var(--signal);flex:1}
+.checkrow small{order:3;flex-basis:100%;color:var(--muted);font-size:calc(12.5px * var(--ts))}
+.checkrow .chev{font-size:20px;color:var(--muted)}
+.ck-sum{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:14px 0 4px}
+.ck-sum b{display:block;font:700 calc(18px * var(--ts))/1.3 var(--display)} .ck-sum small{display:block;color:var(--muted);font-size:calc(12.5px * var(--ts));margin-top:2px}
+.ck-tot{margin:8px 0 0;font-size:calc(14px * var(--ts))}
+.ck{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:8px 0}
+.ck.done{opacity:.7}
+.ck-h b{font:700 calc(17px * var(--ts))/1.2 var(--display);margin-right:6px} .ck-h small{color:var(--muted);font-size:calc(13px * var(--ts))}
+.ck-what{margin:4px 0 8px;font-size:calc(14.5px * var(--ts))}
+.ck-t{width:100%;border-collapse:collapse;font-size:calc(14px * var(--ts));margin:4px 0 8px}
+.ck-t th{text-align:left;font-size:calc(12px * var(--ts));color:var(--muted);font-weight:600;padding:2px 4px}
+.ck-t td{padding:5px 4px;border-top:1px solid var(--rule)} .ck-t td:first-child{color:var(--muted)}
+.ck-t tr.bad td{background:color-mix(in srgb, var(--amber) 14%, transparent);font-weight:700} .ck-t tr.bad td:first-child{color:var(--ink)}
+.ck-warn{background:color-mix(in srgb, var(--danger) 10%, transparent);border-left:3px solid var(--danger);border-radius:0 8px 8px 0;padding:8px 10px;font-size:calc(13.5px * var(--ts));margin:6px 0 10px}
+.ck-fs{display:flex;gap:10px;margin:6px 0}
+.ck-f{flex:1;display:flex;flex-direction:column;gap:3px;font-size:calc(12.5px * var(--ts));color:var(--muted);font-weight:600}
+.ck-f input{font:16px var(--sans);padding:8px 10px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);width:100%;-webkit-user-select:text;user-select:text}
+.ck-done{color:var(--up);font-weight:700;margin:6px 0 0}
+.ck-ok{margin:14px 0} .ck-ok summary{font-weight:700;color:var(--signal)} .ck-ok p{margin:6px 0;font-size:calc(14px * var(--ts))}
 /* Ideas: sections that fold, themes, rich idea cards */
 .fold-sec{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;margin:10px 0 14px;overflow:hidden}
 .fold-sec.strat-sec{border-left:4px solid var(--amber)} .fold-sec.ideas-sec{border-left:4px solid var(--signal)}
@@ -3298,6 +3534,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="cfgsheet" class="sheet" aria-label="Settings"></div>
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
 <div id="newssheet" class="sheet" aria-label="TL;DR"></div>
+<div id="checksheet" class="sheet" aria-label="Check my portfolio"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
   <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
   <div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>

@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.7.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.8.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -120,6 +120,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
 | ✦ **A story per stock** | What the company does, what's happening now and why, whether the price looks cheap or expensive, why buy, what could go wrong and what to watch, with numbered links to its sources. |
 | ✦ **Ideas** | New stocks worth a closer look, picked for your investing style, your strategies and your themes, from what's trending and from good-value lists. Each comes with its key numbers and technicals (P/E, dividend yield, market cap, 50- and 200-day averages, RSI and more); tap one to open its full stock page before you add it. |
+| 📸 **Check against your broker** | Upload screenshots of your broker's portfolio: ✦ AI reads every position and Stockit lists what's missing, what you no longer hold, and where shares, average prices or prices differ. Each is a suggestion you apply, edit or ignore; nothing changes on its own. |
 | 📥 **Bring them in fast** | Search by name or ticker, paste a list (`AAPL 10 @ 150`, `MSFT, NVDA`), open a broker CSV export, or ✦ read the tickers from a screenshot. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
 | 🎬 **Launch screen** | Stockit opens on its logo for 2.4 seconds: the price line draws itself, then "Track. Read. Decide." Tap to skip; with Reduce Motion it appears without movement. It is the shared [launch-screen](https://github.com/gadominas/app-blueprints/blob/main/blueprints/launch-screen.md) blueprint, so all the apps start the same way. |
@@ -128,6 +129,27 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Check against your broker
+
+<img src="docs/screenshots/26-check-differs.png" width="250" align="right" alt="Check my portfolio: AAPL with different shares and average price, MSFT with a price far from Stockit's, each with fields to edit and Apply">
+
+Is Stockit still in step with your real portfolio? In **Portfolio**, tap **Check against your broker** and choose screenshots of your broker's or bank's app (several, if your portfolio takes more than one screen). ✦ AI reads every position exactly as shown, and Stockit compares it with yours:
+
+- **Differs:** shares, average price or the current price don't match. You see Stockit's numbers beside the screenshot's, can edit the suggested shares and average price, then **Apply these** or **Keep Stockit's**. A price that's far off is flagged, with the likely reasons: an older screenshot, another currency or a different listing.
+- **On your screenshots, not in Stockit:** **Add to portfolio** with the shares and average price shown (converted to the stock's currency), or **Find it** if Yahoo doesn't know the name.
+- **In Stockit, not on your screenshots:** **Remove**, **Move to watchlist** or **Keep**, in case you sold it.
+- A stock on your watchlist that you actually own: **Move to portfolio**.
+
+**Nothing changes on its own.** Each suggestion waits for your tap. Tolerances (1% for average prices and 5% for prices by default) and the number of screenshots are in **Settings › Portfolio check**.
+
+<p align="center">
+  <img src="docs/screenshots/25-check.png" width="250" alt="The check's summary: 6 things to review, positions read from the screenshot, and the totals compared">&nbsp;
+  <img src="docs/screenshots/27-check-missing.png" width="250" alt="A stock on the screenshot but not in Stockit, ready to add, and one Yahoo doesn't know">
+</p>
+<p align="center"><sub><b>The summary</b>, with both totals · <b>Missing stocks</b>, ready to add</sub></p>
+
+<br clear="right">
 
 ## One currency for everything
 
@@ -290,6 +312,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Check Stockit against your broker | **Portfolio › Check against your broker**, choose screenshots, then apply or ignore each suggestion |
 | Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |
 | Change the themes for ideas | **Ideas › Themes you like** |
 | Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
@@ -331,7 +354,7 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 - **Everything runs on your phone.** There is no Stockit server and nothing is collected.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
 - **Your keys** (Claude, OpenAI and the optional Finnhub key) are stored in the iOS Keychain and only ever sent to the service they belong to.
-- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), and your strategies, so it can talk about your money and your plans; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
+- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), and your strategies, so it can talk about your money and your plans; for a portfolio check, the screenshots you choose; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
 - **Network requests** go to Yahoo Finance, Google News and StockTwits for data, the publisher's page when you open a TL;DR, Finnhub if you add a key, your AI provider, and this repository for update checks.
 
 ## Where the data comes from
