@@ -4,6 +4,37 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.12.0",
+      "date": "2026-10-30",
+      "title": "Checks that read your totals",
+      "highlights": [
+        {
+          "icon": "🧮",
+          "title": "Shares from the totals",
+          "text": "When your bank shows only a price and a position's value, Stockit works out the shares."
+        },
+        {
+          "icon": "💶",
+          "title": "Average price from the gain",
+          "text": "A value and its gain in the stock's currency give your average price too."
+        },
+        {
+          "icon": "✓",
+          "title": "Honest matches",
+          "text": "A position with only a price is marked Price checked, not Matches."
+        }
+      ],
+      "changes": [
+        "The portfolio check reads each position's total value and its currency, and the gain or loss shown (amount and percentage)",
+        "Shares are worked out as value ÷ price when the screenshot doesn't show them, and compared with Stockit's; a value in another currency than the price goes through today's rate and is marked approximate",
+        "Average price is worked out as (value − gain) ÷ shares when value, gain and stock share a currency; for foreign stocks it isn't, because brokers count the gain at the rates of the day you bought",
+        "A new Position value line compares Stockit's value with your broker's, with the broker's gain beside it",
+        "When a screenshot shows shares and a value that don't add up, the card says so",
+        "Positions with only a price are marked ✓ Price checked instead of ✓ Matches",
+        "Cash and bank accounts, account numbers (IBANs) and other personal identifiers on a screenshot are ignored"
+      ]
+    },
+    {
       "version": "1.11.0",
       "date": "2026-10-30",
       "title": "Privacy for demos",

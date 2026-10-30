@@ -2,6 +2,22 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.12.0 (2026-10-30): Checks that read your totals
+
+- 🧮 **Shares from the totals**: When your bank shows only a price and a position's value, Stockit works out the shares.
+- 💶 **Average price from the gain**: A value and its gain in the stock's currency give your average price too.
+- ✓ **Honest matches**: A position with only a price is marked Price checked, not Matches.
+
+**Changes**
+
+- The portfolio check reads each position's total value and its currency, and the gain or loss shown (amount and percentage)
+- Shares are worked out as value ÷ price when the screenshot doesn't show them, and compared with Stockit's; a value in another currency than the price goes through today's rate and is marked approximate
+- Average price is worked out as (value − gain) ÷ shares when value, gain and stock share a currency; for foreign stocks it isn't, because brokers count the gain at the rates of the day you bought
+- A new Position value line compares Stockit's value with your broker's, with the broker's gain beside it
+- When a screenshot shows shares and a value that don't add up, the card says so
+- Positions with only a price are marked ✓ Price checked instead of ✓ Matches
+- Cash and bank accounts, account numbers (IBANs) and other personal identifiers on a screenshot are ignored
+
 ## 1.11.0 (2026-10-30): Privacy for demos
 
 - 👁 **One tap to hide**: Tap the small eye by Updated to hide your amounts when you show Stockit to someone.
