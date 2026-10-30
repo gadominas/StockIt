@@ -4,6 +4,39 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.8.0",
+      "date": "2026-10-30",
+      "title": "Check against your broker",
+      "highlights": [
+        {
+          "icon": "📸",
+          "title": "Check with screenshots",
+          "text": "Snap your broker's portfolio; ✦ AI reads every position and Stockit compares it with yours."
+        },
+        {
+          "icon": "🔎",
+          "title": "Every gap found",
+          "text": "Missing stocks, ones you no longer hold, different shares or average prices, and prices that don't match."
+        },
+        {
+          "icon": "✋",
+          "title": "You decide",
+          "text": "Nothing changes on its own: apply, edit or ignore each suggestion."
+        }
+      ],
+      "changes": [
+        "Portfolio › Check against your broker: choose one or more screenshots of your broker's or bank's app (up to 6, set in Settings › Portfolio check)",
+        "✦ AI reads each position as shown: ticker or name, shares, average price, current price, value and currency, plus the broker and total; numbers with decimal commas read right",
+        "Stockit matches positions with your stocks by ticker, by ticker without its exchange suffix, or by company name",
+        "Differs: shares, average price or price differ beyond your tolerance (1% and 5% by default); edit the suggested shares and average price, then Apply these or Keep Stockit's",
+        "On your screenshots, not in Stockit: Add to portfolio with the shares and average price shown (converted to the stock's currency), or Find it when Yahoo doesn't know the name",
+        "In Stockit, not on your screenshots: Remove (two taps), Move to watchlist or Keep",
+        "A stock on your watchlist that the screenshot shows you own: Move to portfolio",
+        "A price that's far off is explained: an older screenshot, another currency, or another listing of the same company",
+        "The screenshot's total is compared with Stockit's; token usage counts Portfolio checks separately"
+      ]
+    },
+    {
       "version": "1.7.0",
       "date": "2026-10-30",
       "title": "Ideas you can judge",

@@ -2,6 +2,24 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.8.0 (2026-10-30): Check against your broker
+
+- 📸 **Check with screenshots**: Snap your broker's portfolio; ✦ AI reads every position and Stockit compares it with yours.
+- 🔎 **Every gap found**: Missing stocks, ones you no longer hold, different shares or average prices, and prices that don't match.
+- ✋ **You decide**: Nothing changes on its own: apply, edit or ignore each suggestion.
+
+**Changes**
+
+- Portfolio › Check against your broker: choose one or more screenshots of your broker's or bank's app (up to 6, set in Settings › Portfolio check)
+- ✦ AI reads each position as shown: ticker or name, shares, average price, current price, value and currency, plus the broker and total; numbers with decimal commas read right
+- Stockit matches positions with your stocks by ticker, by ticker without its exchange suffix, or by company name
+- Differs: shares, average price or price differ beyond your tolerance (1% and 5% by default); edit the suggested shares and average price, then Apply these or Keep Stockit's
+- On your screenshots, not in Stockit: Add to portfolio with the shares and average price shown (converted to the stock's currency), or Find it when Yahoo doesn't know the name
+- In Stockit, not on your screenshots: Remove (two taps), Move to watchlist or Keep
+- A stock on your watchlist that the screenshot shows you own: Move to portfolio
+- A price that's far off is explained: an older screenshot, another currency, or another listing of the same company
+- The screenshot's total is compared with Stockit's; token usage counts Portfolio checks separately
+
 ## 1.7.0 (2026-10-30): Ideas you can judge
 
 - 📊 **The numbers behind every idea**: P/E, dividend yield, market cap, 50- and 200-day averages, RSI, range and more on each idea.
