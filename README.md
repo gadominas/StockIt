@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.3.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -61,7 +61,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 - **It opens on your money.** Portfolio value, today's change and the gain since you bought, before anything else.
 - **It explains instead of dumping data.** Tap any number, such as P/E or beta, to see what it means in plain words. The briefing and stories read like a short newspaper piece, with numbered links to the headlines they use.
 - **News in a flash.** The Flash tab puts each stock next to its top three headlines. Tap one for a TL;DR and what it could mean for the stock, then open the source only if it's worth it.
-- **Listen instead of reading.** Tap Listen on a stock and Stockit reads its top articles in full and tells them as one story. Or have the briefing, a TL;DR or the whole Flash read aloud while you walk or drive.
+- **Listen instead of reading.** Tap a stock in Flash and Stockit reads three of its articles in full and tells them as one story. Or have the briefing, a TL;DR or the whole Flash read aloud while you walk or drive.
 - **One place for the news.** Yahoo Finance, the wider web through Google News, and the crowd's mood from StockTwits, for each stock you own or watch.
 - **Bring your stocks in fast.** Paste a list, open your broker's CSV export, or take a screenshot of Apple's Stocks app; no typing ticker by ticker.
 - **Yours.** No account, no tracking, no subscription. Your data stays in your iCloud Drive and AI runs on your own key, with every token counted.
@@ -112,7 +112,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
-| 🎧 **Listen to a stock's news** | **Listen** on a Flash card reads that stock's top three articles in full and ✦ AI tells them as one spoken story, naming its sources, then what it could mean for the stock. Without a key, each article's key sentences are read in turn. |
+| 🎧 **Listen to a stock's news** | Tap a stock in Flash: Stockit reads three of its articles in full (skipping any it can't open) and ✦ AI tells them as one spoken story of 350 to 550 words, naming its sources, then what it could mean for the stock. The story then appears under the card with its sources. Without a key, each article's key sentences are read in turn. |
 | 🔊 **Read aloud** | **Listen** to the briefing, a stock's story, any TL;DR or the whole Flash. Pause, skip or stop from the player at the bottom. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
@@ -140,7 +140,12 @@ The left column shows what matters for that stock at a glance:
 - **Analysts:** the average Wall Street rating from Yahoo Finance, from 1 (Strong Buy) to 5 (Sell).
 - **Crowd:** how StockTwits posts lean, with a bullish-versus-bearish bar.
 
-**🎧 Listen** on a card reads the stock's top articles in full and tells them as one story of a few minutes: what happened, how the pieces connect, the numbers, where each fact comes from, and what it could mean for the stock. **Listen** at the top does the same for every open card in turn. The player starts at once; the first story takes a few seconds while the articles are read, and the next one is prepared while you listen.
+**🎧 Tap a stock** (its ticker, or **Listen** on the card) to hear the story of its news. Stockit opens the top three articles and reads them in full; if one can't be opened, it reads the next headline instead. ✦ AI then tells them as one story of a few minutes: what happened, each article's facts and numbers, how the pieces connect, where each fact comes from, and what it could mean for the stock. Tap the stock again to pause. **Listen** at the top does the same for every open card in turn. The player starts at once; the first story takes a few seconds while the articles are read, and the next one is prepared while you listen.
+
+The story then appears under the card as **The story you heard**, with each source and whether it was read in full or only from its headline. **Details ›** opens the stock's page.
+
+<p align="center"><img src="docs/screenshots/21-flash-story.png" width="250" alt="NVDA playing in Flash, with the story it is reading shown under the card"></p>
+<p align="center"><sub><b>Tap a stock</b>: its three articles, told as one story, with the text under the card</sub></p>
 
 Once you've read a card, tap **✓ Read — fold it**. It shrinks to one line and stays folded until a newer headline arrives; then it opens again, marked **New since you folded it**. **Fold all** and **Open all** are at the top, and **Listen** reads only the open cards.
 
@@ -222,7 +227,8 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Put a read card away | Tap **✓ Read — fold it**; tap the folded line to open it again. **Fold all** and **Open all** are at the top |
 | Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
 | Read the whole article | In the TL;DR, tap **Read the full article at …** |
-| Hear a stock's news as a story | Tap **Listen** on its Flash card; **Listen** at the top plays every open card in turn |
+| Hear a stock's news as a story | Tap the stock in **Flash** (tap again to pause); **Listen** at the top plays every open card in turn |
+| Read the story you heard | Open **The story you heard** under the card |
 | Listen instead of reading | Tap **Listen** on the briefing, a story or a TL;DR. Pause, skip or stop from the player |
 | Change the voice | **Settings › Listening**: **iPhone voice** or **✦ AI voice**, then **Test the voice** |
 | Refresh prices and news | Tap refresh |
@@ -281,6 +287,7 @@ Stockit follows five shared blueprints: in-app updates, settings, AI configurati
 | A stock isn't found | Use its Yahoo Finance ticker, with the exchange suffix outside the US (`ASML.AS`, `VWCE.DE`) |
 | "Updated; couldn't load …" | That source didn't answer. Tap refresh again in a minute; the last loaded data stays on screen |
 | Company numbers are missing | Yahoo sometimes doesn't answer for these. Add a free Finnhub key in **Settings › News and signals** as a backup |
+| A story says some articles were headline only | Those pages block reading from apps. Stockit already tried up to eight headlines; open the sources under **The story you heard** to read them yourself |
 | A TL;DR says the article couldn't be read | The publisher blocks reading from apps (paywall or cookie wall). Tap **Read the full article** to read it at the source |
 | The voice sounds robotic | Download an Enhanced or Premium voice in iOS Settings › Accessibility › Spoken Content › Voices, then pick it in **Settings › Listening**, or switch to **✦ AI voice** |
 | The briefing, views or Ideas are missing | They appear once an AI key is saved in **Settings › AI settings** |

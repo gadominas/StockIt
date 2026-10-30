@@ -22,7 +22,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -816,11 +816,34 @@ function extractArticle(html) {
   const text = paras.join("\n\n");
   return { desc, paras, text, words: text ? text.split(/\s+/).length : 0 };
 }
+// Yahoo asks visitors in Europe for cookie consent before showing an article. Stockit answers the consent form once
+// (the same choice as tapping "Accept all") and keeps the cookies it gets, so later articles load directly.
+let consentRun = null;
+async function yahooConsent(html, pageUrl) {
+  const form = (html.match(/<form[^>]*method="post"[\s\S]*?<\/form>/i) || [])[0];
+  if (!form) return false;
+  const action = new URL((form.match(/action="([^"]*)"/i) || [])[1] || pageUrl, pageUrl).toString();
+  const fields = [];
+  for (const inp of form.match(/<input[^>]+>/gi) || []) {
+    const name = (inp.match(/name="([^"]+)"/i) || [])[1], val = (inp.match(/value="([^"]*)"/i) || [])[1] || "";
+    if (name && /type="hidden"/i.test(inp)) fields.push(encodeURIComponent(name) + "=" + encodeURIComponent(val.replace(/&amp;/g, "&")));
+  }
+  fields.push("agree=agree", "agree=agree");
+  const r = new Request(action);
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded" };
+  r.body = fields.join("&");
+  await r.loadString();
+  const jar = ((r.response && r.response.cookies) || []).filter(c => c && c.name && /yahoo/i.test(c.domain || "yahoo")).map(c => c.name + "=" + c.value);
+  if (jar.length) { settings.yahooCookie = jar.join("; "); write("settings", settings); }
+  return true;
+}
 async function articleHTML(url) {
   const get = async u => {
     const r = new Request(u);
     r.timeoutInterval = cfg("fetchTimeout");
-    r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5" };
+    r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-US,en;q=0.8" };
+    if (settings.yahooCookie && /(^|\.)yahoo\.com$/i.test((u.match(/^https?:\/\/([^/]+)/i) || [])[1] || "")) r.headers.Cookie = settings.yahooCookie;
     const html = await r.loadString();
     return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
   };
@@ -829,6 +852,10 @@ async function articleHTML(url) {
     if (real) url = real;
   }
   let r = await get(url);
+  if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) {   // one consent answer at a time, shared by articles loading together
+    consentRun = consentRun || yahooConsent(r.html, r.url).catch(e => { console.log("Yahoo consent: " + e); return false; }).finally(() => { setTimeout(() => { consentRun = null; }, 0); });
+    if (await consentRun) r = await get(url);
+  }
   if (/news\.google\.com/i.test(r.url)) {   // still a Google page: follow it if it names the article
     const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
     r = m ? await get(m[1].replace(/&amp;/g, "&")) : { html: "", url };
@@ -912,29 +939,49 @@ Reply with ONLY JSON, no code fences: {"tldr":"one sentence with the gist","stor
 // ✦ AI weaves them into a few spoken paragraphs; without AI, each article's key sentences are read in turn.
 async function makeDigest(sym, links) {
   const m = market[sym] || {}, x = stocks.find(y => y.s === sym) || {};
-  const news = links.map(l => (m.news || []).find(h => h.l === l)).filter(Boolean).slice(0, 5);
-  if (!news.length) throw new Error("No headlines to read for " + sym);
-  const arts = await Promise.all(news.map(readArticle));
-  const read = arts.filter(a => a.usable).length, base = { at: Date.now(), n: news.length, read, links: news.map(h => h.l) };
+  const ranked = links.map(l => (m.news || []).find(h => h.l === l)).filter(Boolean).slice(0, 8);
+  if (!ranked.length) throw new Error("No headlines to read for " + sym);
+  // Read the top three articles; when one can't be read, read the next headline instead, until three are read.
+  const want = Math.min(3, ranked.length), done = [];
+  for (let k = 0; k < ranked.length && done.filter(d => d.a.usable).length < want; ) {
+    const need = want - done.filter(d => d.a.usable).length, batch = ranked.slice(k, k + need);
+    k += batch.length;
+    (await Promise.all(batch.map(readArticle))).forEach((a, i) => done.push({ h: batch[i], a }));
+  }
+  const readOnes = done.filter(d => d.a.usable).slice(0, want);
+  const headOnly = ranked.slice(0, want).filter(h => !readOnes.some(d => d.h === h));
+  const used = readOnes.concat(headOnly.map(h => ({ h, a: done.find(d => d.h === h) ? done.find(d => d.h === h).a : { art: null, usable: false } })));
+  const others = (m.news || []).filter(h => !used.some(d => d.h === h)).slice(0, 8);
+  const base = { at: Date.now(), n: used.length, read: readOnes.length, tried: done.length,
+    sources: used.map(d => ({ t: d.h.t, p: d.h.p, l: d.a.url || d.h.l, read: !!d.a.usable, words: d.a.usable ? d.a.art.words : 0 })) };
   const name = cleanName(m.name) || x.name || sym;
-  let note = "";
+  let note = readOnes.length < want ? `Read ${readOnes.length} of ${want} articles in full; the rest are told from their headlines.` : "";
   if (aiKey()) {
     try {
-      const dp = dayPct(m), per = Math.max(2500, Math.floor(cfg("tldrChars") * 1.5 / news.length));
+      const dp = dayPct(m), per = Math.max(3000, Math.floor(cfg("tldrChars") * 2 / Math.max(1, readOnes.length)));
       const system = `You are the news presenter in a stock app, telling a casual long-term investor who owns or watches ${name} (${sym}) what the latest news says. Your words are read aloud by a voice.
-Weave the articles into one story: lead with what matters most, connect the pieces, give the concrete facts and numbers, explain jargon in passing, and say where facts come from in words ("Reuters reports…").
-Use only facts in the articles. Where only a headline or summary is available, say so briefly rather than guessing. Never invent figures, quotes or events. Don't tell the listener to buy or sell.
+Weave the articles into one story: lead with what matters most, then go through what each article reports in detail — the facts, numbers, names, quotes and reasons it gives — connect the pieces, explain jargon in passing, and say where facts come from in words ("Reuters reports…").
+Use only facts in the material given. For items with only a headline, say briefly what the headline reports and that the full article wasn't available. Never invent figures, quotes or events. Don't tell the listener to buy or sell.
 Written for the ear: no bullet points, lists, brackets, tables, URLs or emoji; spell out symbols where it helps ("percent", "billion").
-Reply with ONLY JSON, no code fences: {"title":"at most 10 words","story":"3 to 5 paragraphs separated by blank lines, 250 to 400 words","takeaway":"one or two sentences on what it could mean for ${sym}"}`;
-      const user = `Today is ${dateS(Date.now())}. ${dp != null ? `${sym} moved ${dp.toFixed(2)}% today.` : ""}\n\n` + news.map((h, i) => `Article ${i + 1}: ${h.t}\nFrom ${h.p}, ${dateS(h.at || Date.now())}\n` +
-        (arts[i].usable ? arts[i].art.text.slice(0, per) : arts[i].art && arts[i].art.desc ? "Only its summary is available: " + arts[i].art.desc : "Only the headline is available.")).join("\n\n---\n\n");
-      const j = parseJSON(await aiCall(system, user, 1800, "digest"));
-      return Object.assign(base, { kind: "ai", by: settings.aiProvider, title: String(j.title || name + " in the news").slice(0, 140), story: String(j.story || "").slice(0, 6000), takeaway: String(j.takeaway || "").slice(0, 600) });
+Length: 350 to 550 words in 4 to 6 paragraphs when full articles are given; shorter only if there is genuinely little to say.
+Reply with ONLY JSON, no code fences: {"title":"at most 10 words","story":"the paragraphs, separated by blank lines","takeaway":"one or two sentences on what it could mean for ${sym}"}`;
+      const facts = [dp != null ? `${sym} moved ${dp.toFixed(2)}% today.` : "", m.f && m.f.rating ? `Analysts' average rating: ${m.f.rating}.` : ""].filter(Boolean).join(" ");
+      const user = `Today is ${dateS(Date.now())}. ${facts}\n\n` + used.map((d, i) => `Article ${i + 1}: ${d.h.t}\nFrom ${d.h.p}, ${dateS(d.h.at || Date.now())}\n` +
+          (d.a.usable ? "Full text:\n" + d.a.art.text.slice(0, per) : d.a.art && d.a.art.desc ? "Only its summary is available: " + d.a.art.desc : "Only the headline is available.")).join("\n\n---\n\n") +
+        (others.length ? "\n\n---\n\nOther recent headlines, for context only:\n" + others.map(h => `- ${h.t} (${h.p}, ${dateS(h.at || Date.now())})`).join("\n") : "");
+      let j = parseJSON(await aiCall(system, user, 2600, "digest"));
+      const words = t => String(t || "").split(/\s+/).filter(Boolean).length;
+      if (readOnes.length && words(j.story) < 250) {   // too thin for the material given: ask once more, longer
+        const again = parseJSON(await aiCall(system, user + `\n\nYour last story was only ${words(j.story)} words. Write the full 350 to 550 words, going through each article's details.`, 2600, "digest"));
+        if (words(again.story) > words(j.story)) j = again;
+      }
+      return Object.assign(base, { kind: "ai", by: settings.aiProvider, note, title: String(j.title || name + " in the news").slice(0, 140),
+        story: String(j.story || "").slice(0, 9000), takeaway: String(j.takeaway || "").slice(0, 700), words: words(j.story) });
     } catch (e) { note = "The AI story failed (" + String(e.message || e).slice(0, 60) + "), so these are the articles' key sentences."; }
   }
-  const parts = news.map((h, i) => {
-    const a = arts[i], t = extractiveTldr(h.t, a.usable ? a.art : null, (a.art && a.art.desc) || "");
-    return [h.t + ". From " + h.p + "."].concat(t.lead && t.lead !== h.t ? [t.lead] : []).concat(t.points.slice(0, 4)).join(" ");
+  const parts = used.map(d => {
+    const t = extractiveTldr(d.h.t, d.a.usable ? d.a.art : null, (d.a.art && d.a.art.desc) || "");
+    return [d.h.t + ". From " + d.h.p + "."].concat(t.lead && t.lead !== d.h.t ? [t.lead] : []).concat(t.points.slice(0, 6)).join(" ");
   });
   return Object.assign(base, { kind: "extract", note, title: name + " in the news", story: parts.join("\n\n"), takeaway: "" });
 }
@@ -1234,7 +1281,7 @@ async function handle(m) {
       return call("onTldr", m.id, tldrs[id]);
     }
     case "digest": {   // Flash › Listen: a stock's top articles as one story, cached for the same headlines
-      const links = (Array.isArray(m.links) ? m.links : []).map(String).slice(0, 5), id = "d:" + tldrId(m.s + "|" + links.join("|"));
+      const links = (Array.isArray(m.links) ? m.links : []).map(String).slice(0, 8), id = "d2:" + tldrId(m.s + "|" + links.slice(0, 3).join("|"));
       if (tldrs[id] && !m.force && !(tldrs[id].kind === "extract" && aiKey())) return call("onDigest", m.id, tldrs[id]);   // a key added since: tell it with AI now
       try { tldrs[id] = await makeDigest(m.s, links); pruneTldrs(); write("tldrs", tldrs); }
       catch (e) { return call("onDigest", m.id, { error: String(e.message || e) }); }
@@ -1840,12 +1887,13 @@ function clientApp() {
   // ---- Flash: each stock's top headlines, a TL;DR per headline, and reading aloud ----
   const MAJOR = /reuters|bloomberg|financial times|wall street journal|\bwsj\b|cnbc|barron|marketwatch|economist|associated press|yahoo finance|investor's business|morningstar|nikkei|forbes|fortune|handelsblatt/i;
   const QUOTE_PAGE = /stock price, news, quote|bond yield and price|price, chart|quote & history|historical prices/i;   // listing pages, not news
-  function topNews(x) {
+  function rankNews(x) {
     const now = Date.now(), tick = x.s.split(/[.=^-]/)[0].replace(/[^A-Za-z0-9]/g, ""), first = String(x.name || "").split(/[\s,.]/)[0].toLowerCase();
     const about = h => (tick && new RegExp("\\b" + tick + "\\b", "i").test(h.t)) || (first.length > 2 && h.t.toLowerCase().includes(first));
     const score = h => Math.exp(-(now - h.at) / 864e5 / 1.5) + (MAJOR.test(h.p) ? 0.5 : 0) + (about(h) ? 0.4 : -0.8);   // headlines that don't name the company sink
-    return (x.news || []).filter(h => !QUOTE_PAGE.test(h.t)).map(h => [h, score(h)]).sort((a, b) => b[1] - a[1]).slice(0, S.cfg.flashPerStock || 3).map(a => a[0]);
+    return (x.news || []).filter(h => !QUOTE_PAGE.test(h.t)).map(h => [h, score(h)]).sort((a, b) => b[1] - a[1]).map(a => a[0]);
   }
+  const topNews = x => rankNews(x).slice(0, S.cfg.flashPerStock || 3);
   const flashOrder = () => S.stocks.slice().sort((a, b) => (a.list === "own" ? 0 : 1) - (b.list === "own" ? 0 : 1)
     || ((b.sh || 0) * (b.price || 0)) - ((a.sh || 0) * (a.price || 0)) || a.s.localeCompare(b.s));
   // A folded card stays folded until a newer headline arrives; then it opens again, marked New.
@@ -1868,6 +1916,14 @@ function clientApp() {
       ${r ? `<span class="fl-r" title="Average analyst rating">Analysts <b>${esc(r[0])}</b>${r[1] ? ` <span class="muted">${esc(r[1])}</span>` : ""}</span>` : ""}
       ${crowd != null ? `<span class="fl-r" title="StockTwits crowd mood">Crowd <b class="${crowd >= 50 ? "up" : "down"}">${crowd}% bullish</b></span><span class="flmood" aria-hidden="true"><i style="width:${crowd}%"></i></span>` : ""}`;
   }
+  const dgOpen = new Set();
+  function storyPanel(x, d, dk) {
+    const srcs = d.sources || [];
+    return `<details class="fl-story" data-k="${esc(dk)}" ${dgOpen.has(dk) ? "open" : ""}><summary>${d.kind === "ai" ? "✦ " : ""}The story you heard · ${srcs.length ? `${d.read} of ${srcs.length} articles read in full` : esc(rel(d.at))}</summary>
+      <h4>${esc(d.title)}</h4>${paras(d.story).join("")}${d.takeaway ? `<p class="fl-take"><b>What it could mean for ${esc(x.s)}:</b> ${esc(d.takeaway)}</p>` : ""}
+      ${srcs.length ? `<ol class="fl-src">${srcs.map(sr => `<li><button class="link small" data-act="openlink" data-v="${esc(sr.l)}">${esc(sr.t)}</button><small>${esc(sr.p)} · ${sr.read ? `read in full, ${sr.words} words` : "headline only — the article couldn't be opened"}</small></li>`).join("")}</ol>` : ""}
+      ${d.note ? `<p class="note">${esc(d.note)}</p>` : ""}</details>`;
+  }
   function flashHTML() {
     if (!S.stocks.length) return `<section class="empty"><h2>No stocks yet</h2><p>Add a stock and its top headlines appear here, each with a TL;DR.</p><button class="primary" data-act="addopen">Add stocks</button></section>`;
     const n = S.cfg.flashPerStock || 3, list = flashOrder(), folded = list.filter(isFolded).length;
@@ -1880,13 +1936,15 @@ function clientApp() {
         if (f) return `<article class="fl folded" id="c-fl-${esc(x.s)}"><button class="fl-fold" data-act="fold" data-v="${esc(x.s)}" data-on="0" aria-label="Open ${esc(x.s)} headlines">
             <b>${esc(x.s)}</b><span class="pill ${cls(dayPct(x))}">${pct(dayPct(x))}</span>${x.sig ? sigChip(x.sig) : ""}
             <span class="fl-fs">${top.length} read · newest ${top.length ? rel(newest(x)) : "—"}</span><span class="chev" aria-hidden="true">›</span></button></article>`;
-        return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="open" data-v="${esc(x.s)}" aria-label="Open ${esc(x.s)}">
-            <b>${esc(x.s)}</b><small>${short}</small></button>${flashFacts(x)}</div>
+        const dk = dgKey(x), dd = dg[dk], busyS = !!dgWait[dk], on = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s;
+        return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="listenstock" data-v="${esc(x.s)}" aria-label="Listen to ${esc(x.s)} news">
+            <b>${esc(x.s)} <span class="fl-spk ${busyS ? "busy" : ""}">${busyS ? `<span class="busy-dot"></span>` : SPK}</span></b><small>${short}</small></button>${flashFacts(x)}
+            <button class="fl-open" data-act="open" data-v="${esc(x.s)}">Details ›</button></div>
           <div class="fl-n">${isNew ? `<span class="fl-new">New since you folded it</span>` : ""}${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
             : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}
-            ${top.length ? `<div class="fl-act"><button class="fl-done" data-act="fold" data-v="${esc(x.s)}" data-on="1">✓ Read — fold it</button><button class="fl-lis" data-act="listenstock" data-v="${esc(x.s)}">${SPK}Listen</button></div>` : ""}</div></article>`;
+            ${top.length ? `<div class="fl-act"><button class="fl-done" data-act="fold" data-v="${esc(x.s)}" data-on="1">✓ Read — fold it</button><button class="fl-lis" data-act="listenstock" data-v="${esc(x.s)}">${SPK}Listen</button></div>` : ""}</div>${dd && !dd.error ? storyPanel(x, dd, dk) : ""}</article>`;
       }).join("")}</div>
-      <p class="note pad">Tap a headline for its TL;DR, or Listen for the story of a stock's top articles; fold a card once you've read it, and it opens again when new headlines arrive. Analysts is the average Wall Street rating from Yahoo Finance; Crowd is the StockTwits mood. Not financial advice.</p>`;
+      <p class="note pad">Tap a stock to hear the story of its top three articles, read in full; tap a headline for its TL;DR; fold a card once you've read it, and it opens again when new headlines arrive. Analysts is the average Wall Street rating from Yahoo Finance; Crowd is the StockTwits mood. Not financial advice.</p>`;
   }
   const newsOf = (s, l) => { const x = byS(s); return x && (x.news || []).find(h => h.l === l); };
   function openNews(s, l) {
@@ -2089,10 +2147,10 @@ function clientApp() {
   function getDigest(x) {
     const k = dgKey(x);
     if (dg[k] && !(dg[k].kind === "extract" && S.settings.hasKey)) return Promise.resolve(dg[k]);
-    if (!dgWait[k]) { let res; const p = new Promise(r => { res = r; }); dgWait[k] = { p, res }; send("digest", { s: x.s, links: topNews(x).map(h => h.l), id: k }); }
+    if (!dgWait[k]) { let res; const p = new Promise(r => { res = r; }); dgWait[k] = { p, res }; send("digest", { s: x.s, links: rankNews(x).slice(0, 8).map(h => h.l), id: k }); if (tab === "flash") render(); }
     return dgWait[k].p;
   }
-  window.onDigest = (id, d) => { if (!d.error) dg[id] = d; const w = dgWait[id]; delete dgWait[id]; if (w) w.res(d); };
+  window.onDigest = (id, d) => { if (!d.error) dg[id] = d; const w = dgWait[id]; delete dgWait[id]; if (w) w.res(d); if (tab === "flash") render(); };
   function digestItem(x, d) {
     if (d.error) return { id: "fl-" + x.s, title: x.s, text: sentence(x.name || x.s) + " " + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ") };
     return { id: "fl-" + x.s, title: (d.kind === "ai" ? "✦ " : "") + x.s + " — " + d.title, text: `${sentence(x.name || x.s)} ${sentence(d.title)} ${d.story.replace(/\s*\n+\s*/g, " ")} ${d.takeaway ? sentence(d.takeaway) : ""}` };
@@ -2140,6 +2198,7 @@ function clientApp() {
     $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
     $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
     if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
+    if (!on || tts.idle) document.querySelectorAll(".fl.speaking").forEach(el => el.classList.remove("speaking"));
   }
   const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
   const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
@@ -2211,7 +2270,7 @@ function clientApp() {
       case "listenbrief": if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
       case "listenstory": { const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
       case "listenflash": { const xs = flashOrder().filter(x => !isFolded(x) && topNews(x).length); if (xs.length) listenNews(xs, "Flash"); else window.toast("No headlines to read yet"); break; }
-      case "listenstock": { const x = byS(v); if (x && topNews(x).length) listenNews([x], x.s + " news"); break; }
+      case "listenstock": { const x = byS(v); if (!x || !topNews(x).length) break; const cur = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s; if (cur || (tts.on && tts.label === x.s + " news")) togglePause(); else listenNews([x], x.s + " news"); break; }
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
@@ -2284,6 +2343,7 @@ function clientApp() {
     }
   });
   // Typed values and menus arrive through "change"
+  document.addEventListener("toggle", e => { const el = e.target; if (el.classList && el.classList.contains("fl-story")) { if (el.open) dgOpen.add(el.dataset.k); else dgOpen.delete(el.dataset.k); } }, true);
   document.addEventListener("change", e => {
     if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
     if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
@@ -2593,6 +2653,20 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .fl-r b{color:var(--ink);font-weight:700}
 .flmood{display:flex;width:100%;height:5px;margin-top:-3px;border-radius:3px;overflow:hidden;background:var(--down);opacity:.85}
 .flmood i{flex:none;height:100%;background:var(--up)}
+.fl-spk{display:inline-grid;place-items:center;width:24px;height:24px;margin-left:4px;border-radius:12px;background:var(--signal-wash);color:var(--signal);vertical-align:2px}
+.fl-spk .ico{width:14px;height:14px;margin:0}
+.fl-spk .busy-dot{width:12px;height:12px}
+.fl.speaking .fl-spk{background:var(--amber);color:var(--paper)}
+.fl-open{font-size:calc(12.5px * var(--ts));font-weight:700;color:var(--signal);padding:2px 0}
+.fl-story{grid-column:1 / -1;margin:0;border-top:1px solid var(--rule);padding-top:10px}
+.fl-story summary{font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);cursor:pointer}
+.fl-story h4{font:700 calc(16px * var(--ts))/1.3 var(--display);margin:8px 0 6px}
+.fl-story p{font-size:calc(14.5px * var(--ts));line-height:1.55;margin:0 0 9px}
+.fl-take{background:var(--signal-wash);border-radius:8px;padding:8px 10px}
+.fl-src{padding-left:1.2em;margin:6px 0}
+.fl-src li{margin-bottom:6px;font-size:calc(13px * var(--ts))}
+.fl-src li .link{text-align:left;font-weight:600}
+.fl-src small{display:block;color:var(--muted)}
 .fl-act{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
 .fl-done{font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:6px 0}
 .fl-lis{display:inline-flex;align-items:center;font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:5px 10px;border-radius:16px;background:var(--signal-wash)}
