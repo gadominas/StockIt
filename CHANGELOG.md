@@ -2,6 +2,22 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.9.0 (2026-10-30): A clearer portfolio check
+
+- 🛡 **Always one tap away**: A ✓ icon on your portfolio opens the check; on your first launches a big button shows the way.
+- 🖼 **See what you upload**: Your screenshots appear right away; remove one, add more, then Check, with a progress bar.
+- 🚦 **Every stock marked**: Each result says Matches, Different, Price doesn't match, Not in Stockit or Not on your screenshots.
+
+**Changes**
+
+- The big Check against your broker button shows on the first three launches with owned stocks, then shrinks into a ✓ icon on the portfolio summary after six seconds; the icon stays there
+- Screenshots are added one by one and shown at once as thumbnails, numbered, each with × to remove; Check stays off until there's at least one
+- While checking, a progress bar with a percentage says what's happening (reading with ✦ AI, then checking each stock), and the screenshots show a scanning light
+- Results are all open, with no folded lists: a summary with counts for each kind of result, the totals compared and the screenshots, then one card per stock, problems first and matches last
+- Each card has a coloured badge and edge, and a Stockit-versus-broker comparison with ✓ or ≠ on every line
+- Price doesn't match explains that, if the screenshot is recent, Stockit may hold the wrong shares or average price, or another listing of the company, and offers the shares and average price to correct
+- New check starts over; Clear results forgets the screenshots
+
 ## 1.8.0 (2026-10-30): Check against your broker
 
 - 📸 **Check with screenshots**: Snap your broker's portfolio; ✦ AI reads every position and Stockit compares it with yours.
