@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Listen to a stock's news: its top articles are read in full and told as one ✦ AI story (or their key sentences without AI)
  *  - Read aloud, as in BlogPulse: the briefing, stories, TL;DRs and Flash, with iPhone voices or ✦ OpenAI voices
  *  - Optional Claude or OpenAI: a portfolio briefing, a story and a buy / hold / sell view per stock, and new ideas
  *  - Home Screen widget in the shared frame (app-blueprints · widgets), in-app updates from GitHub
@@ -21,7 +22,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -73,7 +74,7 @@ const CONFIG = [
     { k: "briefingHours", label: "Rewrite the briefing at most every", help: "Adding or removing a stock also brings a new one", unit: "h", def: 6, min: 1, max: 48, step: 1 },
     { k: "briefingMaxStocks", label: "Stocks in the briefing", help: "Owned stocks first, biggest first, then the watchlist", unit: "stocks", def: 25, min: 5, max: 60, step: 5 },
     { k: "aiHeadlines", label: "Headlines AI reads per stock", help: "More gives richer stories but uses more tokens", unit: "headlines", def: 6, min: 2, max: 15, step: 1 },
-    { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 9000, min: 2000, max: 30000, step: 1000 },
+    { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 12000, min: 2000, max: 30000, step: 1000 },
     { k: "ideasCount", label: "Ideas per request", unit: "ideas", def: 5, min: 3, max: 10, step: 1 },
     { k: "ideaThemes", label: "Themes for ideas", help: "One per line; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
   ]],
@@ -823,13 +824,51 @@ async function articleHTML(url) {
     const html = await r.loadString();
     return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
   };
+  if (/news\.google\.com/i.test(url)) {   // Google News links: find the publisher's address first
+    const real = await googleNewsURL(url).catch(e => { console.log("Google News link: " + e); return null; });
+    if (real) url = real;
+  }
   let r = await get(url);
-  if (/news\.google\.com/i.test(r.url)) {   // a Google News page: follow it to the publisher if it names the article
+  if (/news\.google\.com/i.test(r.url)) {   // still a Google page: follow it if it names the article
     const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
     r = m ? await get(m[1].replace(/&amp;/g, "&")) : { html: "", url };
   }
   if (r.code >= 400 || /(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) r.html = "";
   return r;
+}
+// Google News article links hide the publisher's address. Older ones carry it inside the id; newer ones are
+// exchanged for it with the signature and timestamp on Google's article page (the method news readers use).
+async function googleNewsURL(url) {
+  const id = (String(url).match(/\/articles\/([^?/#]+)/) || [])[1];
+  if (!id) return null;
+  try {
+    const b = id.replace(/-/g, "+").replace(/_/g, "/"), raw = Data.fromBase64String(b + "===".slice((b.length + 3) % 4)).toRawString() || "";
+    const m = raw.match(/https?:\/\/[^\s"'<>\x00-\x1f\x7f-\uffff]+/);
+    if (m && !/^AU_yq/.test(raw.slice(4))) return m[0];
+  } catch (e) {}
+  const page = await getText(`https://news.google.com/rss/articles/${id}`, { Accept: "text/html" });
+  const sg = (page.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (page.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+  if (!sg || !ts) return null;
+  const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${ts},"${sg}"]`;
+  const r = new Request("https://news.google.com/_/DotsSplashUi/data/batchexecute");
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": cfg("userAgent") };
+  r.body = "f.req=" + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
+  const txt = await r.loadString();
+  for (const line of String(txt).split("\n")) {
+    if (!line.startsWith("[")) continue;
+    try { for (const row of JSON.parse(line)) if (row[0] === "wrb.fr" && row[2]) { const res = JSON.parse(row[2]); if (res[0] === "garturlres" && /^https?:/.test(res[1])) return res[1]; } } catch (e) {}
+  }
+  const m = String(txt).match(/garturlres\\+",\\+"(https?:[^"\\]+)/);
+  return m ? m[1] : null;
+}
+// Articles read this session, by link: a TL;DR and a stock's news story share them instead of loading pages twice.
+const artMem = {};
+async function readArticle(n) {
+  if (artMem[n.l]) return artMem[n.l];
+  let art = null, url = n.l;
+  try { const r = await articleHTML(n.l); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { console.log("Article " + n.l + ": " + e); }
+  return artMem[n.l] = { art, url: /^https:\/\//i.test(url) ? url : n.l, usable: !!(art && art.words > 80) };
 }
 function extractiveTldr(title, art, text) {
   if (!art || !art.paras.length) return { lead: text || title, points: [] };
@@ -844,32 +883,60 @@ function extractiveTldr(title, art, text) {
   sents.forEach((x, i) => { const ts = tk(x.s); x.i = i; x.score = ts.reduce((n, t) => n + Math.min(freq[t], 6) + (inTitle.has(t) ? 3 : 0), 0) / Math.sqrt(ts.length || 1) + (x.pi < 2 ? 2 : 0); });
   const lead = art.desc && art.desc.length > 40 ? art.desc : (sents[0] ? sents[0].s : title);
   const points = sents.filter(x => x.s !== lead && !lead.includes(x.s.slice(0, 40)))
-    .sort((a, b) => b.score - a.score).slice(0, 4).sort((a, b) => a.i - b.i).map(x => x.s);
+    .sort((a, b) => b.score - a.score).slice(0, 6).sort((a, b) => a.i - b.i).map(x => x.s);
   return { lead, points };
 }
 async function makeNewsTldr(sym, n) {
   const m = market[sym] || {}, x = stocks.find(y => y.s === sym) || {};
-  let art = null, url = n.l;
-  try { const r = await articleHTML(n.l); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { console.log("Article " + n.l + ": " + e); }
-  const usable = !!(art && art.words > 80);
+  const ra = await readArticle(n), art = ra.art, usable = ra.usable;
   const text = usable ? art.text : (art && art.desc) || "";
-  const base = { at: Date.now(), mins: usable ? Math.max(1, Math.round(art.words / 230)) : 0, partial: !usable, url: /^https:\/\//i.test(url) ? url : n.l };
+  const base = { at: Date.now(), mins: usable ? Math.max(1, Math.round(art.words / 230)) : 0, partial: !usable, url: ra.url };
   let note = "";
   if (aiKey()) {
     try {
       const name = cleanName(m.name) || x.name || sym, dp = dayPct(m);
       const system = `You write TL;DRs of financial news for a casual long-term investor who owns or watches ${name} (${sym}). Plain words, short sentences, explain any jargon in passing.
 Use only facts in what you're given. If the article text is missing, explain only what the headline and summary say and make clear the full article wasn't available. Never invent figures, quotes or events. Don't tell the reader to buy or sell.
-Reply with ONLY JSON, no code fences: {"tldr":"one sentence","points":["3 to 5 short bullets with the concrete facts"],"why":"one or two sentences on what this could mean for ${sym}"}`;
-      const user = `Headline: ${n.t}\nPublisher: ${n.p}\nPublished: ${new Date(n.at || Date.now()).toISOString().slice(0, 10)}\n${dp != null ? `${sym} moved ${dp.toFixed(2)}% today.\n` : ""}\n` +
+Reply with ONLY JSON, no code fences: {"tldr":"one sentence with the gist","story":"2 or 3 short paragraphs separated by blank lines, 120 to 200 words: what happened, why, and the context the article gives, with its concrete numbers and names","points":["4 to 6 short bullets with the key facts and figures"],"why":"two or three sentences on what this could mean for ${sym} and its shareholders"}`;
+      const user = `Headline: ${n.t}\nPublisher: ${n.p}\nPublished: ${dateS(n.at || Date.now())}\n${dp != null ? `${sym} moved ${dp.toFixed(2)}% today.\n` : ""}\n` +
         (usable ? "Article text:\n" + text.slice(0, cfg("tldrChars")) : text ? "Only the article's summary is available:\n" + text : "The article text is not available.");
-      const j = parseJSON(await aiCall(system, user, 900, "tldr"));
-      return Object.assign(base, { kind: "ai", by: settings.aiProvider, lead: String(j.tldr || n.t).slice(0, 600),
-        points: (Array.isArray(j.points) ? j.points : []).map(String).slice(0, 6), why: String(j.why || "").slice(0, 600) });
+      const j = parseJSON(await aiCall(system, user, 1500, "tldr"));
+      return Object.assign(base, { kind: "ai", by: settings.aiProvider, lead: String(j.tldr || n.t).slice(0, 600), story: String(j.story || "").slice(0, 3000),
+        points: (Array.isArray(j.points) ? j.points : []).map(String).slice(0, 6), why: String(j.why || "").slice(0, 800) });
     } catch (e) { note = "The AI summary failed (" + String(e.message || e).slice(0, 60) + "), so this was taken from the article instead."; }
   }
   if (!usable && !text) throw new Error("This article couldn't be read here. Open it at the source to read it");
   return Object.assign(base, { kind: "extract", note }, extractiveTldr(n.t, usable ? art : null, text));
+}
+// A stock's news, told as one story to listen to: its top articles are read in full (kept in memory) and
+// ✦ AI weaves them into a few spoken paragraphs; without AI, each article's key sentences are read in turn.
+async function makeDigest(sym, links) {
+  const m = market[sym] || {}, x = stocks.find(y => y.s === sym) || {};
+  const news = links.map(l => (m.news || []).find(h => h.l === l)).filter(Boolean).slice(0, 5);
+  if (!news.length) throw new Error("No headlines to read for " + sym);
+  const arts = await Promise.all(news.map(readArticle));
+  const read = arts.filter(a => a.usable).length, base = { at: Date.now(), n: news.length, read, links: news.map(h => h.l) };
+  const name = cleanName(m.name) || x.name || sym;
+  let note = "";
+  if (aiKey()) {
+    try {
+      const dp = dayPct(m), per = Math.max(2500, Math.floor(cfg("tldrChars") * 1.5 / news.length));
+      const system = `You are the news presenter in a stock app, telling a casual long-term investor who owns or watches ${name} (${sym}) what the latest news says. Your words are read aloud by a voice.
+Weave the articles into one story: lead with what matters most, connect the pieces, give the concrete facts and numbers, explain jargon in passing, and say where facts come from in words ("Reuters reports…").
+Use only facts in the articles. Where only a headline or summary is available, say so briefly rather than guessing. Never invent figures, quotes or events. Don't tell the listener to buy or sell.
+Written for the ear: no bullet points, lists, brackets, tables, URLs or emoji; spell out symbols where it helps ("percent", "billion").
+Reply with ONLY JSON, no code fences: {"title":"at most 10 words","story":"3 to 5 paragraphs separated by blank lines, 250 to 400 words","takeaway":"one or two sentences on what it could mean for ${sym}"}`;
+      const user = `Today is ${dateS(Date.now())}. ${dp != null ? `${sym} moved ${dp.toFixed(2)}% today.` : ""}\n\n` + news.map((h, i) => `Article ${i + 1}: ${h.t}\nFrom ${h.p}, ${dateS(h.at || Date.now())}\n` +
+        (arts[i].usable ? arts[i].art.text.slice(0, per) : arts[i].art && arts[i].art.desc ? "Only its summary is available: " + arts[i].art.desc : "Only the headline is available.")).join("\n\n---\n\n");
+      const j = parseJSON(await aiCall(system, user, 1800, "digest"));
+      return Object.assign(base, { kind: "ai", by: settings.aiProvider, title: String(j.title || name + " in the news").slice(0, 140), story: String(j.story || "").slice(0, 6000), takeaway: String(j.takeaway || "").slice(0, 600) });
+    } catch (e) { note = "The AI story failed (" + String(e.message || e).slice(0, 60) + "), so these are the articles' key sentences."; }
+  }
+  const parts = news.map((h, i) => {
+    const a = arts[i], t = extractiveTldr(h.t, a.usable ? a.art : null, (a.art && a.art.desc) || "");
+    return [h.t + ". From " + h.p + "."].concat(t.lead && t.lead !== h.t ? [t.lead] : []).concat(t.points.slice(0, 4)).join(" ");
+  });
+  return Object.assign(base, { kind: "extract", note, title: name + " in the news", story: parts.join("\n\n"), takeaway: "" });
 }
 function pruneTldrs() { Object.keys(tldrs).sort((a, b) => tldrs[b].at - tldrs[a].at).slice(150).forEach(k => delete tldrs[k]); }
 
@@ -1161,10 +1228,17 @@ async function handle(m) {
       const n = ((market[m.s] || {}).news || []).find(h => h.l === m.l);
       if (!n) return call("onTldr", m.id, { error: "This headline is no longer in the list. Refresh and try again" });
       const id = tldrId(n.l);
-      if (tldrs[id] && !m.force) return call("onTldr", m.id, tldrs[id]);
+      if (tldrs[id] && !m.force && !(tldrs[id].kind === "extract" && aiKey())) return call("onTldr", m.id, tldrs[id]);
       try { tldrs[id] = await makeNewsTldr(m.s, n); pruneTldrs(); write("tldrs", tldrs); }
       catch (e) { return call("onTldr", m.id, { error: String(e.message || e) }); }
       return call("onTldr", m.id, tldrs[id]);
+    }
+    case "digest": {   // Flash › Listen: a stock's top articles as one story, cached for the same headlines
+      const links = (Array.isArray(m.links) ? m.links : []).map(String).slice(0, 5), id = "d:" + tldrId(m.s + "|" + links.join("|"));
+      if (tldrs[id] && !m.force && !(tldrs[id].kind === "extract" && aiKey())) return call("onDigest", m.id, tldrs[id]);   // a key added since: tell it with AI now
+      try { tldrs[id] = await makeDigest(m.s, links); pruneTldrs(); write("tldrs", tldrs); }
+      catch (e) { return call("onDigest", m.id, { error: String(e.message || e) }); }
+      return call("onDigest", m.id, tldrs[id]);
     }
     case "ttsaudio":   // one piece of ✦ AI speech, returned to the page as base64 MP3
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
@@ -1230,7 +1304,7 @@ function clientApp() {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
   const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
@@ -1810,14 +1884,14 @@ function clientApp() {
             <b>${esc(x.s)}</b><small>${short}</small></button>${flashFacts(x)}</div>
           <div class="fl-n">${isNew ? `<span class="fl-new">New since you folded it</span>` : ""}${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
             : `<p class="muted small">${x.newsAt ? "No headlines in the last few days." : "Headlines load with the next refresh."}</p>`}
-            ${top.length ? `<button class="fl-done" data-act="fold" data-v="${esc(x.s)}" data-on="1">✓ Read — fold it</button>` : ""}</div></article>`;
+            ${top.length ? `<div class="fl-act"><button class="fl-done" data-act="fold" data-v="${esc(x.s)}" data-on="1">✓ Read — fold it</button><button class="fl-lis" data-act="listenstock" data-v="${esc(x.s)}">${SPK}Listen</button></div>` : ""}</div></article>`;
       }).join("")}</div>
-      <p class="note pad">Tap a headline for its TL;DR; fold a card once you've read it, and it opens again when new headlines arrive. Analysts is the average Wall Street rating from Yahoo Finance; Crowd is the StockTwits mood. Not financial advice.</p>`;
+      <p class="note pad">Tap a headline for its TL;DR, or Listen for the story of a stock's top articles; fold a card once you've read it, and it opens again when new headlines arrive. Analysts is the average Wall Street rating from Yahoo Finance; Crowd is the StockTwits mood. Not financial advice.</p>`;
   }
   const newsOf = (s, l) => { const x = byS(s); return x && (x.news || []).find(h => h.l === l); };
   function openNews(s, l) {
     newsOpen = { s, l };
-    if (!tl[l] || tl[l].error) { tl[l] = "loading"; send("tldr", { s, l, id: l }); }
+    if (!tl[l] || tl[l].error || (tl[l].kind === "extract" && S.settings.hasKey)) { tl[l] = "loading"; send("tldr", { s, l, id: l }); }
     renderNews(); $("#newssheet").scrollTop = 0;
   }
   window.onTldr = (id, d) => { tl[id] = d; if (newsOpen && newsOpen.l === id) renderNews(); };
@@ -1834,6 +1908,7 @@ function clientApp() {
     else body = `<div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${PN[d.by] || esc(d.by)}</span>` : `<span class="badge-ex">From the article — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
       ${d.partial ? `<p class="note">The full article couldn't be read here, so this ${d.kind === "ai" ? "explains the headline and summary" : "is the article's own summary"}.</p>` : ""}${d.note ? `<p class="note">${esc(d.note)}</p>` : ""}
       <p class="tl-lead">${esc(d.lead)}</p>
+      ${d.story ? `<div class="tl-story">${paras(d.story).join("")}</div><h3 class="mini">Key facts</h3>` : ""}
       ${(d.points || []).length ? `<ul class="tl-pts">${d.points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
       ${d.why ? `<div class="tl-why"><b>What it could mean for ${esc(x.s)}</b><p>${esc(d.why)}</p></div>` : ""}
       <div class="tl-listen"><button class="listen" data-act="listentldr">${SPK}Listen</button>${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry">✦ Summarise with AI</button>` : ""}</div>`;
@@ -1851,7 +1926,7 @@ function clientApp() {
   }
   const sentence = t => { t = clean(t); return t && !/[.!?]$/.test(t) ? t + "." : t; };
   function tldrItems(x, h, d) {
-    return [{ title: h.t, text: [h.t, "From " + h.p, d.lead].concat(d.points || []).concat(d.why ? ["What it could mean for " + (x.name || x.s) + ": " + d.why] : []).map(sentence).join(" ") }];
+    return [{ title: h.t, text: [h.t, "From " + h.p, d.lead].concat(d.story ? [d.story.replace(/\s*\n+\s*/g, " ")] : d.points || []).concat(d.why ? ["What it could mean for " + (x.name || x.s) + ": " + d.why] : []).map(sentence).join(" ") }];
   }
   function briefItems(b) {
     return [{ title: b.headline, text: sentence(b.headline) + " " + b.story }].concat((b.watch || []).length ? [{ title: "Keep an eye on", text: "Keep an eye on: " + b.watch.map(sentence).join(" ") }] : []);
@@ -1863,7 +1938,7 @@ function clientApp() {
   }
   function flashItems() {
     return flashOrder().filter(x => !isFolded(x)).map(x => ({ id: "fl-" + x.s, title: x.s, text: topNews(x).length
-      ? `${x.name || x.s}. ` + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ")
+      ? sentence(x.name || x.s) + " " + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ")
       : "" })).filter(it => it.text);
   }
 
@@ -1935,7 +2010,7 @@ function clientApp() {
   }
   function aiPlayPart() {
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return stopSpeaking();
+    if (!part) return waitOrStop();
     tts.loading = !part.audio; renderPlayer();
     aiFetch(part).then(b64 => {
       if (my !== tts.token) return;
@@ -1974,7 +2049,7 @@ function clientApp() {
   function playPart() {
     if (tts.engine === "ai") return aiPlayPart();
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return stopSpeaking();
+    if (!part) return waitOrStop();
     const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
@@ -1982,8 +2057,57 @@ function clientApp() {
     u.onend = next; u.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
     SYN.speak(u); renderPlayer();
   }
+  // A queue the player starts on at once (inside the tap, so audio is allowed) and fills as stories arrive.
+  function waitOrStop() {
+    if (tts.on && tts.waiting > 0) { tts.idle = true; tts.loading = true; renderPlayer(); return; }
+    return stopSpeaking();
+  }
+  function speakQueue(label, n) {
+    const ai = aiTTS();
+    if (!ai && (!SYN || !voices.length)) {   // no Web Speech: the system voice reads everything once it's ready
+      const buf = []; let left = n;
+      window.toast("Reading the articles… the system voice starts when they're ready");
+      return it => { if (it) buf.push(it); if (--left === 0 && buf.length) send("speak", { text: buf.map(x => clean(x.text)).join(" ") }); };
+    }
+    stopSpeaking(true);
+    if (ai) unlockAudio();
+    const ses = Date.now() + Math.random();
+    Object.assign(tts, { engine: ai ? "ai" : "device", items: [], label, i: 0, paused: false, on: true, parts: [], waiting: n, idle: true, loading: true, ses });
+    renderPlayer();
+    return it => {
+      if (tts.ses !== ses || !tts.on) return;
+      tts.waiting--;
+      if (it) { const k = tts.items.length; tts.items.push(it); (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })); }
+      if (tts.idle && tts.i < tts.parts.length) { tts.idle = false; playSoon(); }
+      else if (tts.idle && !tts.waiting) stopSpeaking();
+      else renderPlayer();
+    };
+  }
+  // Listen to stocks' news: each stock's top articles, read in full and told as one story, one stock after another.
+  const dg = {}, dgWait = {};
+  const dgKey = x => x.s + "|" + topNews(x).map(h => h.l).join("|");
+  function getDigest(x) {
+    const k = dgKey(x);
+    if (dg[k] && !(dg[k].kind === "extract" && S.settings.hasKey)) return Promise.resolve(dg[k]);
+    if (!dgWait[k]) { let res; const p = new Promise(r => { res = r; }); dgWait[k] = { p, res }; send("digest", { s: x.s, links: topNews(x).map(h => h.l), id: k }); }
+    return dgWait[k].p;
+  }
+  window.onDigest = (id, d) => { if (!d.error) dg[id] = d; const w = dgWait[id]; delete dgWait[id]; if (w) w.res(d); };
+  function digestItem(x, d) {
+    if (d.error) return { id: "fl-" + x.s, title: x.s, text: sentence(x.name || x.s) + " " + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ") };
+    return { id: "fl-" + x.s, title: (d.kind === "ai" ? "✦ " : "") + x.s + " — " + d.title, text: `${sentence(x.name || x.s)} ${sentence(d.title)} ${d.story.replace(/\s*\n+\s*/g, " ")} ${d.takeaway ? sentence(d.takeaway) : ""}` };
+  }
+  async function listenNews(xs, label) {
+    const add = speakQueue(label, xs.length);
+    if (S.settings.hasKey) window.toast(`Reading ${xs.length === 1 ? "the articles" : xs.length + " stocks' articles"}; the story starts in a few seconds`);
+    for (const x of xs) {
+      const d = await getDigest(x);
+      if (d.note || d.error) window.toast(String(d.note || d.error).slice(0, 120));
+      add(digestItem(x, d));
+    }
+  }
   function stopSpeaking(quiet) {
-    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
+    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; tts.waiting = 0; tts.idle = false; tts.ses = 0; clearTimeout(tts.timer);
     au.onended = null; try { au.pause(); } catch (e) {}
     if (SYN) SYN.cancel();
     if (!quiet) renderPlayer();
@@ -1999,7 +2123,7 @@ function clientApp() {
   function skipItem() {
     if (!tts.on) return;
     const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
-    if (j < 0) return stopSpeaking();
+    if (j < 0) { if (!tts.waiting) return stopSpeaking(); tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel(); tts.i = tts.parts.length; return waitOrStop(); }
     tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
     tts.i = j; tts.paused = false; playSoon();
   }
@@ -2011,7 +2135,7 @@ function clientApp() {
     const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
     $("#plTitle").textContent = it.title || tts.label;
     $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
-      + (tts.loading ? " — preparing…" : tts.paused ? " — paused" : "");
+      + (tts.loading ? (tts.idle ? " — reading the articles…" : " — preparing…") : tts.paused ? " — paused" : "");
     pl.classList.toggle("paused", tts.paused);
     $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
     $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
@@ -2086,7 +2210,8 @@ function clientApp() {
       case "listentldr": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
       case "listenbrief": if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
       case "listenstory": { const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
-      case "listenflash": { const items = flashItems(); if (items.length) speak("Flash", items); else window.toast("No headlines to read yet"); break; }
+      case "listenflash": { const xs = flashOrder().filter(x => !isFolded(x) && topNews(x).length); if (xs.length) listenNews(xs, "Flash"); else window.toast("No headlines to read yet"); break; }
+      case "listenstock": { const x = byS(v); if (x && topNews(x).length) listenNews([x], x.s + " news"); break; }
       case "plpause": togglePause(); break;
       case "plnext": skipItem(); break;
       case "plstop": stopSpeaking(); break;
@@ -2468,7 +2593,10 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .fl-r b{color:var(--ink);font-weight:700}
 .flmood{display:flex;width:100%;height:5px;margin-top:-3px;border-radius:3px;overflow:hidden;background:var(--down);opacity:.85}
 .flmood i{flex:none;height:100%;background:var(--up)}
-.fl-done{align-self:flex-start;margin-top:8px;font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:6px 0}
+.fl-act{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+.fl-done{font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:6px 0}
+.fl-lis{display:inline-flex;align-items:center;font-size:calc(13px * var(--ts));font-weight:700;color:var(--signal);padding:5px 10px;border-radius:16px;background:var(--signal-wash)}
+.fl-lis .ico{width:14px;height:14px}
 .fl-new{align-self:flex-start;font-size:calc(11.5px * var(--ts));font-weight:700;color:var(--amber);margin-bottom:4px}
 .fl.folded{display:block;padding:0;opacity:.82}
 .fl-fold{display:flex;align-items:center;gap:8px;width:100%;padding:11px 12px;text-align:left}
@@ -2494,6 +2622,8 @@ body.d-compact .fl{padding:9px;gap:9px} body.d-tiny .fl-h small{display:none}
 html[data-font=serif] .tl-lead{font-family:var(--serif)}
 .tl-pts{padding-left:1.2em;margin:0 0 16px}
 .tl-pts li{font-size:calc(16px * var(--ts));line-height:1.55;margin-bottom:8px;color:var(--ink-2)}
+.tl-story p{font-size:calc(16px * var(--ts));line-height:1.6;margin:0 0 12px;color:var(--ink)}
+html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .tl-why{background:var(--sheet);border-left:3px solid var(--signal);border-radius:0 10px 10px 0;padding:10px 14px;margin:0 0 16px}
 .tl-why p{margin:4px 0 0;color:var(--ink-2);font-size:calc(15px * var(--ts));line-height:1.5}
 .tl-listen{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 18px}

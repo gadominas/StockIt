@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.2.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -61,7 +61,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 - **It opens on your money.** Portfolio value, today's change and the gain since you bought, before anything else.
 - **It explains instead of dumping data.** Tap any number, such as P/E or beta, to see what it means in plain words. The briefing and stories read like a short newspaper piece, with numbered links to the headlines they use.
 - **News in a flash.** The Flash tab puts each stock next to its top three headlines. Tap one for a TL;DR and what it could mean for the stock, then open the source only if it's worth it.
-- **Listen instead of reading.** Have the briefing, a stock's story, a TL;DR or the whole Flash read aloud while you walk or drive.
+- **Listen instead of reading.** Tap Listen on a stock and Stockit reads its top articles in full and tells them as one story. Or have the briefing, a TL;DR or the whole Flash read aloud while you walk or drive.
 - **One place for the news.** Yahoo Finance, the wider web through Google News, and the crowd's mood from StockTwits, for each stock you own or watch.
 - **Bring your stocks in fast.** Paste a list, open your broker's CSV export, or take a screenshot of Apple's Stocks app; no typing ticker by ticker.
 - **Yours.** No account, no tracking, no subscription. Your data stays in your iCloud Drive and AI runs on your own key, with every token counted.
@@ -112,6 +112,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
+| 🎧 **Listen to a stock's news** | **Listen** on a Flash card reads that stock's top three articles in full and ✦ AI tells them as one spoken story, naming its sources, then what it could mean for the stock. Without a key, each article's key sentences are read in turn. |
 | 🔊 **Read aloud** | **Listen** to the briefing, a stock's story, any TL;DR or the whole Flash. Pause, skip or stop from the player at the bottom. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
@@ -139,6 +140,8 @@ The left column shows what matters for that stock at a glance:
 - **Analysts:** the average Wall Street rating from Yahoo Finance, from 1 (Strong Buy) to 5 (Sell).
 - **Crowd:** how StockTwits posts lean, with a bullish-versus-bearish bar.
 
+**🎧 Listen** on a card reads the stock's top articles in full and tells them as one story of a few minutes: what happened, how the pieces connect, the numbers, where each fact comes from, and what it could mean for the stock. **Listen** at the top does the same for every open card in turn. The player starts at once; the first story takes a few seconds while the articles are read, and the next one is prepared while you listen.
+
 Once you've read a card, tap **✓ Read — fold it**. It shrinks to one line and stays folded until a newer headline arrives; then it opens again, marked **New since you folded it**. **Fold all** and **Open all** are at the top, and **Listen** reads only the open cards.
 
 <p align="center">
@@ -149,12 +152,12 @@ Once you've read a card, tap **✓ Read — fold it**. It shrinks to one line an
 
 Tap a headline to open its **TL;DR**:
 
-- **The gist** in one sentence, then the **key points** and **what it could mean** for the stock.
+- **The gist** in one sentence, **the story** in two or three paragraphs, the **key facts** and **what it could mean** for the stock.
 - **✦ AI summary** when you have a key, labelled with the provider. Without a key, Stockit picks the key sentences from the article itself, labelled **no AI**.
 - **Listen** reads it aloud. **Read the full article at …** opens the original at the publisher.
 - **More about** the same stock is listed underneath, one tap away.
 
-Some articles can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
+Google News links are followed to the publisher's own article. Some articles still can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
 
 <br clear="right">
 
@@ -219,7 +222,8 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Put a read card away | Tap **✓ Read — fold it**; tap the folded line to open it again. **Fold all** and **Open all** are at the top |
 | Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
 | Read the whole article | In the TL;DR, tap **Read the full article at …** |
-| Listen instead of reading | Tap **Listen** on the briefing, a story, a TL;DR or Flash. Pause, skip or stop from the player |
+| Hear a stock's news as a story | Tap **Listen** on its Flash card; **Listen** at the top plays every open card in turn |
+| Listen instead of reading | Tap **Listen** on the briefing, a story or a TL;DR. Pause, skip or stop from the player |
 | Change the voice | **Settings › Listening**: **iPhone voice** or **✦ AI voice**, then **Test the voice** |
 | Refresh prices and news | Tap refresh |
 | Change anything else | Tap **Settings** |
@@ -250,7 +254,7 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 - **Everything runs on your phone.** There is no Stockit server and nothing is collected.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
 - **Your keys** (Claude, OpenAI and the optional Finnhub key) are stored in the iOS Keychain and only ever sent to the service they belong to.
-- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), so it can talk about your money; for a TL;DR, the article's text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
+- **What goes to the AI:** prices, company numbers and headlines, and for the briefing your portfolio's makeup (which stocks you own and how much of each), so it can talk about your money; for a TL;DR or a stock's news story, the articles' text. Only when a feature needs it, and only to the provider you chose. With ✦ AI voice, the text being read goes to OpenAI.
 - **Network requests** go to Yahoo Finance, Google News and StockTwits for data, the publisher's page when you open a TL;DR, Finnhub if you add a key, your AI provider, and this repository for update checks.
 
 ## Where the data comes from
