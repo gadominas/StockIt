@@ -2,6 +2,19 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.2.0 (2026-10-30): Flash, at a glance
+
+- 💼 **Your stake beside the news**: Each Flash card now shows your shares, today's profit or loss and Stockit's view.
+- 🧭 **Analysts and the crowd**: The average Wall Street rating and the StockTwits mood, right next to the headlines.
+- ✓ **Fold what you've read**: Fold a card once read; it opens again by itself when new headlines arrive.
+
+**Changes**
+
+- Flash cards fill the left column: shares, today's profit or loss in your currency, the ✦ buy, hold or sell view (or the price trend without AI), the analysts' average rating and the crowd's mood
+- ✓ Read — fold it: a read card shrinks to one line (ticker, today's move, view, when the newest headline arrived); it opens again, marked New, when a newer headline arrives
+- Fold all and Open all at the top of Flash; Listen reads only the cards that are open
+- Flash ranks headlines that name the company first and leaves out quote and listing pages (such as "stock price, news, quote and history" or bond-yield pages)
+
 ## 1.1.0 (2026-10-29): Flash news, read to you
 
 - ⚡ **Flash news**: A new tab with each stock beside its top three headlines, ranked by recency and source.

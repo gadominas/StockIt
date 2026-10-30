@@ -4,6 +4,34 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.2.0",
+      "date": "2026-10-30",
+      "title": "Flash, at a glance",
+      "highlights": [
+        {
+          "icon": "💼",
+          "title": "Your stake beside the news",
+          "text": "Each Flash card now shows your shares, today's profit or loss and Stockit's view."
+        },
+        {
+          "icon": "🧭",
+          "title": "Analysts and the crowd",
+          "text": "The average Wall Street rating and the StockTwits mood, right next to the headlines."
+        },
+        {
+          "icon": "✓",
+          "title": "Fold what you've read",
+          "text": "Fold a card once read; it opens again by itself when new headlines arrive."
+        }
+      ],
+      "changes": [
+        "Flash cards fill the left column: shares, today's profit or loss in your currency, the ✦ buy, hold or sell view (or the price trend without AI), the analysts' average rating and the crowd's mood",
+        "✓ Read — fold it: a read card shrinks to one line (ticker, today's move, view, when the newest headline arrived); it opens again, marked New, when a newer headline arrives",
+        "Fold all and Open all at the top of Flash; Listen reads only the cards that are open",
+        "Flash ranks headlines that name the company first and leaves out quote and listing pages (such as \"stock price, news, quote and history\" or bond-yield pages)"
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-10-29",
       "title": "Flash news, read to you",
