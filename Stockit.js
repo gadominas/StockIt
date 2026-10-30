@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - ✦ Suggested strategies from your portfolio, watchlist and plans, refreshed on a schedule you choose; keep any as your own, and edit every strategy
  *  - Check my portfolio: screenshots of your broker's app compared with Stockit, every difference a suggestion you apply or ignore
  *  - All your money in one currency of your choice (euros, dollars, …), in the app and the widget
  *  - Charts from one day to five years; touch to see the price at any moment
@@ -27,7 +28,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.9.0';
+const VERSION = '1.10.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -82,6 +83,10 @@ const CONFIG = [
     { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 12000, min: 2000, max: 30000, step: 1000 },
     { k: "ideasCount", label: "Ideas per request", unit: "ideas", def: 5, min: 3, max: 10, step: 1 },
     { k: "ideaThemes", label: "Themes for ideas", help: "Edited in the Ideas tab; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
+  ]],
+  ["Strategy suggestions", [
+    { k: "stratEvery", label: "Refresh suggested strategies every", help: "When Stockit opens, after a refresh or when you open Ideas; 0 means only when you tap Refresh", unit: "h", def: 24, min: 0, max: 168, step: 6 },
+    { k: "stratCount", label: "Strategies suggested at a time", unit: "strategies", def: 3, min: 1, max: 5, step: 1 },
   ]],
   ["Portfolio check", [
     { k: "checkPriceTol", label: "Flag a price difference from", help: "Between your screenshot and the price Stockit has; screenshots are often a little older", unit: "%", def: 5, min: 1, max: 30, step: 1 },
@@ -221,7 +226,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0,    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true,   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -586,6 +591,7 @@ async function runRefresh(force = false) {
     saveAll(); push(); saveWidget(widgetSnapshot());
     if (syms.length) toast(failed.length ? `Updated; couldn't load ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? " and " + (failed.length - 3) + " more" : ""}` : "Prices and news updated");
     if (settings.ai && aiKey() && briefingDue()) await runBriefing(false);
+    if (stratDue()) await runStratSuggest(false);   // suggested strategies, when they're older than you chose
   } finally { refreshing = false; call("onProgress", 0, 0); }
 }
 
@@ -1273,6 +1279,46 @@ async function applyCheck(m) {
   saveAll(); push(); saveWidget(widgetSnapshot());
 }
 
+// ---------- ✦ Suggested strategies: plans drawn from your portfolio, watchlist and strategies, kept fresh ----------
+// Refreshed when they're older than Settings › Strategy suggestions (every day by default), because prices and
+// exchange rates move; each run also updates "Where it stands" for your own active strategies.
+let stratBusy = false;
+function stratDue() {
+  const h = cfg("stratEvery"), g = insights.stratSuggest;
+  return h > 0 && stocks.length > 0 && settings.aiStrat !== false && !!aiKey() && (!g || Date.now() - g.at > h * 3600e3);
+}
+async function runStratSuggest(force) {
+  if (stratBusy || (!force && !stratDue())) return;
+  if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
+  stratBusy = true; call("onBusy", "strat", true);
+  try {
+    const tot = totals()[0], home = homeCur();
+    const watch = stocks.filter(x => x.list !== "own").map(x => { const m = market[x.s] || {}, st = stats(m), tr = trendOf(m);
+      return `${x.s} (${m.name || x.name || x.s})${m.price != null ? ", " + fx(m.price) + " " + (m.cur || "") : ""}${st.p6m != null ? ", " + sx(st.p6m) + " in 6 months" : ""}${tr ? ", " + tr.trend : ""}`; });
+    const own = stocks.filter(x => x.list === "own").map(x => { const m = market[x.s] || {}, st = stats(m), tr = trendOf(m), sector = m.prof && m.prof.sector;
+      return `${x.s} (${m.name || x.name || x.s}${sector ? ", " + sector : ""})${st.p6m != null ? ", " + sx(st.p6m) + " in 6 months" : ""}${tr ? ", " + tr.trend : ""}`; });
+    const n = cfg("stratCount"), act = strategies.filter(g => g.status !== "retired");
+    const user = `Today is ${dateS(Date.now())}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.${planLine()}${positionsLine()}
+${tot ? `Portfolio value: ${fx(tot.value)} ${tot.cur}, ${sx(tot.value - tot.day ? tot.day / (tot.value - tot.day) * 100 : 0)} today. The investor counts their money in ${home}.` : ""}
+Owned: ${own.join("; ") || "nothing yet"}.
+Watching: ${watch.join("; ") || "nothing"}.
+Themes they like: ${cfg("ideaThemes").filter(Boolean).join("; ")}.
+
+Suggest ${n} new strategies this investor could adopt, different from their own strategies above: concrete plans for this portfolio and watchlist, such as rebalancing, trimming or adding to a position under a condition, using a watchlist stock, spreading risk across sectors or currencies, or how to carry out one of their own strategies. Name the tickers involved. Write each in the first person, the way the investor would write it in their notes, with a timing or condition, and say why with the numbers above. Don't repeat or merely rephrase their strategies.
+${act.length ? "Also, for each of their own active strategies, say in one or two sentences where it stands today given these prices." : ""}
+JSON in this exact shape: {"strategies":[{"text":"1 or 2 sentences, first person","when":"timing or condition, short","why":"1 or 2 sentences with the numbers that support it","tickers":["NVDA"]}],"notes":[{"id":"strategy id","note":"where it stands today"}]}`;
+    const o = parseJSON(await aiCall(TONE, user, 1800, "strategies"));
+    const list = (Array.isArray(o.strategies) ? o.strategies : []).filter(g => g && g.text).slice(0, n).map((g, i) => ({
+      id: "s" + Date.now().toString(36) + i, text: String(g.text).slice(0, 600), when: String(g.when || "").slice(0, 80), why: String(g.why || "").slice(0, 500),
+      tickers: (Array.isArray(g.tickers) ? g.tickers : []).map(String).slice(0, 6) }));
+    const notes = {};
+    for (const x of Array.isArray(o.notes) ? o.notes : []) if (x && x.note && strategies.some(g => g.id === x.id)) notes[x.id] = String(x.note).slice(0, 500);
+    insights.stratSuggest = { at: Date.now(), list, notes, by: settings.aiProvider, model: modelFor(settings.aiProvider), cur: home };
+    write("insights", insights); push();
+  } catch (e) { toast("Strategies not suggested: " + String(e.message || e).slice(0, 90)); }
+  finally { stratBusy = false; call("onBusy", "strat", false); }
+}
+
 // ---------- in-app updates (app-blueprints · in-app-updates) ----------
 // Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
 function cmpVer(a, b) {
@@ -1389,7 +1435,8 @@ function clientState() {
     fx: (() => { const home = homeCur(), rates = {};
       for (const [k, r] of Object.entries(fxRates)) if (k.endsWith(home) && k.length === home.length + 3) rates[k.slice(0, 3)] = { rate: r.rate, prev: r.prev, at: r.at };
       return { home, choice: settings.homeCur || "auto", rates, curs: HOME_CURS }; })(),
-    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy },
+    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy, strat: stratBusy },
+    stratSuggest: insights.stratSuggest || null,
     check, checkShots: checkShots.map(x => x.thumb),
     ai: {
       provider: settings.aiProvider,
@@ -1407,7 +1454,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1477,7 +1524,7 @@ async function handle(m) {
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
-      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates",
+      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -1602,6 +1649,23 @@ async function handle(m) {
       if (g) { g.status = m.type === "stratretire" ? "retired" : "active"; g.retiredAt = m.type === "stratretire" ? Date.now() : null; write("strategies", strategies); }
       return push();
     }
+    case "stratedit": {   // your strategies can always be changed
+      const g = strategies.find(x => x.id === m.v), text = String(m.text || "").trim().slice(0, 600);
+      if (!g || !text) return push();
+      g.text = text; g.when = String(m.when || "").trim().slice(0, 80); g.editedAt = Date.now();
+      write("strategies", strategies); return push();
+    }
+    case "stratkeep": {   // a suggested strategy becomes yours
+      const ss = insights.stratSuggest, it = ss && ss.list.find(x => x.id === m.v);
+      if (!it) return;
+      const text = String(m.text != null ? m.text : it.text).trim().slice(0, 600);
+      if (text) strategies.unshift({ id: "g" + Date.now().toString(36), text, when: String(m.when != null ? m.when : it.when || "").trim().slice(0, 80), status: "active", at: Date.now(), from: "suggested" });
+      ss.list = ss.list.filter(x => x.id !== m.v);
+      write("strategies", strategies); write("insights", insights); return push();
+    }
+    case "stratdismiss": { const ss = insights.stratSuggest; if (ss) { ss.list = ss.list.filter(x => x.id !== m.v); write("insights", insights); } return push(); }
+    case "stratsuggest": return runStratSuggest(true);
+    case "stratdue": return runStratSuggest(false);
     case "stratdelete": strategies = strategies.filter(x => x.id !== m.v); write("strategies", strategies); return push();
     case "startlog": {
       let txt = "";
@@ -1665,15 +1729,16 @@ function clientApp() {
   let newsOpen = null; const tl = {};
   let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null, ckProg = null, ckShown = 0, ckTimer = null; const ckEdit = {};
   let introState = null;   // "big" on the first launches, then "shrunk" a few seconds later
+  let stratEditing = null; const stratEdit = { text: "", when: "" }, sgEdit = {};
   let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", check: "Portfolio checks", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", check: "Portfolio checks", strategies: "Strategy suggestions", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
-  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
+  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); if (S.busy.strat) busyK.add("strat"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
 
   // ---- appearance (app-blueprints · settings, Step 3) ----
@@ -2122,18 +2187,44 @@ function clientApp() {
   }
 
   // ---- ideas ----
+  const EVERY = [[6, "6 hours"], [12, "12 hours"], [24, "day"], [48, "2 days"], [0, "only when I tap Refresh"]];
+  function suggestHTML() {
+    const G = S.stratSuggest, bz = isBusy("strat"), every = S.cfg.stratEvery != null ? S.cfg.stratEvery : 24;
+    if (!S.settings.hasKey) return "";
+    const list = (G && G.list) || [];
+    const sel = `<label class="sg-every"><span>Refresh every</span><select id="stratEvery" class="cursel">${EVERY.concat(EVERY.some(e => e[0] === every) ? [] : [[every, every + " hours"]]).map(([v, l]) => `<option value="${v}" ${v === every ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
+    const card = g => {
+      const ed = sgEdit[g.id];
+      return `<article class="strat-c sg">${ed ? `<textarea class="sg-in" data-id="${esc(g.id)}" data-f="text" rows="3">${esc(ed.text)}</textarea><input class="sg-in cfgin wide" data-id="${esc(g.id)}" data-f="when" value="${esc(ed.when)}" placeholder="Timing (optional)">`
+        : `<p class="strat-t">${esc(g.text)}</p>${g.when ? `<small class="muted">Timing: ${esc(g.when)}</small>` : ""}`}
+        ${g.why ? `<p class="strat-ai">${esc(g.why)}</p>` : ""}${(g.tickers || []).length ? `<div class="sg-tk">${g.tickers.map(t => `<button class="chip" data-act="${S.stocks.some(x => x.s === t) ? "open" : "preview"}" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
+        <div class="aic-btns"><button class="sm primary" data-act="sgkeep" data-v="${esc(g.id)}">${ed ? "Keep my version" : "Keep"}</button>${ed ? `<button class="sm" data-act="sgcancel" data-v="${esc(g.id)}">Cancel</button>` : `<button class="sm" data-act="sgedit" data-v="${esc(g.id)}">Edit, then keep</button>`}<button class="sm" data-act="sgdismiss" data-v="${esc(g.id)}">Dismiss</button></div></article>`;
+    };
+    return `<div class="sg-box"><div class="sg-h"><span class="badge-ai">✦ Suggested for you</span>${G ? `<small class="muted">${rel(G.at)}${G.by ? " · " + (PN[G.by] || esc(G.by)) : ""}</small>` : ""}</div>
+      <p class="muted small">Plans drawn from your portfolio, watchlist, strategies and today's prices${G && G.cur ? " in " + esc(G.cur) : ""}. Keep one to make it yours; you can change it any time.</p>
+      ${bz ? `<div class="tli-load" role="status"><span class="busy-dot"></span>Thinking about your portfolio…</div>` : list.map(card).join("") || `<p class="note">${G ? "You've kept or dismissed all of these. Refresh for new ones." : "No suggestions yet."}</p>`}
+      <div class="sg-foot">${sel}<button class="sm" data-act="sgrefresh" ${bz ? "disabled" : ""}>${G ? "Refresh now" : "Suggest strategies"}</button></div></div>`;
+  }
   function strategiesHTML() {
     const all = S.strategies || [], act = all.filter(g => g.status !== "retired"), ret = all.filter(g => g.status === "retired");
-    const notes = (S.ideas && S.ideas.notes) || {};
-    const card = g => `<article class="strat-c ${g.status === "retired" ? "retired" : ""}"><p class="strat-t">${esc(g.text)}</p>
-      <small class="muted">${g.when ? `Timing: ${esc(g.when)} · ` : ""}Set ${rel(g.at)}${g.status === "retired" && g.retiredAt ? ` · retired ${rel(g.retiredAt)}` : ""}</small>
-      ${g.status !== "retired" && notes[g.id] ? `<p class="strat-ai"><span class="badge-ai">✦ Where it stands</span> ${esc(notes[g.id])}</p>` : ""}
+    const I = S.ideas || {}, G = S.stratSuggest || {};
+    const note = id => { const a = (I.notes || {})[id], b = (G.notes || {})[id]; return a && b ? ((G.at || 0) > (I.at || 0) ? [b, G.at] : [a, I.at]) : a ? [a, I.at] : b ? [b, G.at] : null; };
+    const card = g => {
+      const n = g.status !== "retired" && note(g.id), ed = stratEditing === g.id;
+      if (ed) return `<article class="strat-c editing"><label class="lk-l">Your strategy</label><textarea id="stratEditText" rows="3">${esc(stratEdit.text)}</textarea>
+        <input id="stratEditWhen" class="cfgin wide" placeholder="Timing (optional)" value="${esc(stratEdit.when)}">
+        <div class="aic-btns"><button class="sm primary" data-act="stratsave" data-v="${esc(g.id)}">Save</button><button class="sm" data-act="stratcancel">Cancel</button></div></article>`;
+      return `<article class="strat-c ${g.status === "retired" ? "retired" : ""}"><p class="strat-t">${esc(g.text)}</p>
+      <small class="muted">${g.when ? `Timing: ${esc(g.when)} · ` : ""}${g.from === "suggested" ? "From a ✦ suggestion · " : ""}Set ${rel(g.at)}${g.editedAt ? ` · changed ${rel(g.editedAt)}` : ""}${g.status === "retired" && g.retiredAt ? ` · retired ${rel(g.retiredAt)}` : ""}</small>
+      ${n ? `<p class="strat-ai"><span class="badge-ai">✦ Where it stands</span> ${esc(n[0])} <small class="muted">${rel(n[1])}</small></p>` : ""}
       <div class="aic-btns">${g.status === "retired"
         ? `<button class="sm" data-act="stratrestore" data-v="${esc(g.id)}">Bring back</button><button class="sm danger ${stratArmed === g.id ? "armed" : ""}" data-act="stratdelete" data-v="${esc(g.id)}">${stratArmed === g.id ? "Confirm" : "Delete"}</button>`
-        : `<button class="sm" data-act="stratretire" data-v="${esc(g.id)}">Retire</button>`}</div></article>`;
-    return foldSec("strat", "My strategies", `${act.length} active${ret.length ? ` · ${ret.length} retired` : ""}`, `<div class="strat">
-      <p class="brief-p muted">Your own plans and directions${S.settings.hasKey ? ". ✦ Ideas, the briefing and stock stories take them into account" : ""}. Retire one when it's done or no longer what you want.</p>
+        : `<button class="sm" data-act="stratedit" data-v="${esc(g.id)}">Edit</button><button class="sm" data-act="stratretire" data-v="${esc(g.id)}">Retire</button>`}</div></article>`;
+    };
+    return foldSec("strat", "My strategies", `${act.length} active${ret.length ? ` · ${ret.length} retired` : ""}${(S.stratSuggest && S.stratSuggest.list || []).length ? ` · ${S.stratSuggest.list.length} suggested` : ""}`, `<div class="strat">
+      <p class="brief-p muted">Your own plans and directions${S.settings.hasKey ? ". ✦ Ideas, the briefing and stock stories take them into account" : ""}. Edit one any time, or retire it when it's done.</p>
       ${act.map(card).join("") || `<p class="note">No strategies yet. For example: “When Nike recovers to my average price, sell it and buy a pharmaceutical company”, or “Over the next six months, invest more in pharma companies working with AI companies”.</p>`}
+      ${suggestHTML()}
       <div class="strat-add"><label for="stratText" class="lk-l">New strategy</label>
         <textarea id="stratText" rows="3" placeholder="e.g. When Nike recovers, sell it and buy a pharmaceutical company">${esc(stratText)}</textarea>
         <input id="stratWhen" class="cfgin wide" placeholder="Timing (optional), e.g. in six months, when NKE is back at $80" value="${esc(stratWhen)}">
@@ -2181,7 +2272,7 @@ function clientApp() {
       <div class="rangebox"><small>52-week range</small><div class="rbar"><i style="left:${st.pos52 == null ? 50 : st.pos52.toFixed(1)}%"></i></div>
         <div class="rlab"><span>${money(st.lo, it.cur)}</span><span>${st.pos52 == null ? "" : "now at " + st.pos52.toFixed(0) + "% of the range"}</span><span>${money(st.hi, it.cur)}</span></div></div>
       <div class="rangebox"><small>Performance</small><div class="perf">${[["1 month", st.p1m], ["6 months", st.p6m], ["1 year", st.p1y]].map(([l, v]) => `<span><small>${l}</small><b class="${cls(v)}">${pct(v, 1)}</b></span>`).join("")}</div></div>
-      ${it.trend ? `<p class="ink2"><span class="chip t-${it.trend.trend}">${TREND[it.trend.trend]}</span> ${esc(it.trend.why)}</p>` : ""}
+      ${it.trend ? `<p class="ink2 idea-trend"><span class="chip t-${it.trend.trend}">${TREND[it.trend.trend]}</span> ${esc(it.trend.why)}</p>` : ""}
       ${ek && EXPLAIN[ek] ? `<p class="explain">${esc(EXPLAIN[ek])}</p>` : `<p class="note">Tap a number to see what it means.</p>`}` : `<p class="note">Ask for new ideas to see their numbers and technicals.</p>`}
       <div class="aic-btns">${sigChip({ signal: it.signal })}<span class="grow"></span><button class="sm" data-act="preview" data-v="${esc(it.s)}">See everything</button>${have ? `<span class="note">On your lists ✓</span>` : `<button class="sm primary" data-act="watchidea" data-v="${esc(it.s)}">Add to watchlist</button>`}</div></article>`;
   }
@@ -2456,6 +2547,8 @@ function clientApp() {
       <h3 class="sec">What AI does</h3>
       <div class="srow"><div class="grow"><b>Portfolio briefing</b><small class="muted">Written after a refresh, at most every ${S.cfg.briefingHours} h or when your stocks change; one request each time. Stories and ideas run only when you tap them.</small></div>
         <button class="switch ${S.settings.ai ? "on" : ""}" data-act="toggle" data-v="ai" aria-label="Portfolio briefing"></button></div>
+      <div class="srow"><div class="grow"><b>Suggested strategies</b><small class="muted">${S.cfg.stratEvery ? `Refreshed every ${S.cfg.stratEvery >= 24 ? (S.cfg.stratEvery / 24 === 1 ? "day" : S.cfg.stratEvery / 24 + " days") : S.cfg.stratEvery + " hours"}, when Stockit opens or you open Ideas; one request each time.` : "Only when you tap Refresh in Ideas."}</small></div>
+        <button class="switch ${S.settings.aiStrat ? "on" : ""}" data-act="toggle" data-v="aiStrat" aria-label="Suggested strategies"></button></div>
       <h3 class="sec">Token usage</h3>
       ${used.length ? used.map(p => usageBlock(p, A.usage.p[p])).join("") : `<p class="muted pad">No AI requests yet.</p>`}
       ${used.length ? `<div class="aic-btns"><span class="note">Counting since ${new Date(A.usage.since).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</span>
@@ -2934,14 +3027,16 @@ function clientApp() {
     searching = true; results = null; renderAdd(); send("search", { q: v.trim() });
   }
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "q") { e.preventDefault(); e.target.blur(); find(); } });
-  document.addEventListener("input", e => { if (e.target.classList && e.target.classList.contains("ck-in")) { const id = e.target.dataset.id; ckEdit[id] = Object.assign(ckEdit[id] || {}, { [e.target.dataset.f]: e.target.value }); return; } if (e.target.id === "themeIn") themeText = e.target.value; if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
+  document.addEventListener("input", e => { if (e.target.id === "stratEditText") { stratEdit.text = e.target.value; return; } if (e.target.id === "stratEditWhen") { stratEdit.when = e.target.value; return; }
+    if (e.target.classList && e.target.classList.contains("sg-in")) { const g = sgEdit[e.target.dataset.id]; if (g) g[e.target.dataset.f] = e.target.value; return; }
+    if (e.target.classList && e.target.classList.contains("ck-in")) { const id = e.target.dataset.id; ckEdit[id] = Object.assign(ckEdit[id] || {}, { [e.target.dataset.f]: e.target.value }); return; } if (e.target.id === "themeIn") themeText = e.target.value; if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
   document.addEventListener("click", e => {
     if (e.target.closest("select, option, input, textarea, summary")) return;   // form controls handle themselves
     const t = e.target.closest("[data-act]");
     if (!t || t.disabled) return;
     const act = t.dataset.act, v = t.dataset.v;
     switch (act) {
-      case "tab": tab = v; if (v !== "ideas") send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
+      case "tab": tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "refresh": if (!progress) send("refresh", { force: true }); break;
       case "newsopen": openNews(t.dataset.s, v); break;
@@ -2970,6 +3065,14 @@ function clientApp() {
         send("stratadd", { text: tx, when: stratWhen.trim() }); stratText = ""; stratWhen = "";
         window.toast(S.settings.hasKey ? "Strategy added. The next ✦ ideas and briefing take it into account" : "Strategy added"); break;
       }
+      case "stratedit": { const g = (S.strategies || []).find(x => x.id === v); if (!g) break; stratEditing = v; stratEdit.text = g.text; stratEdit.when = g.when || ""; render(); const ta = $("#stratEditText"); if (ta) ta.focus(); break; }
+      case "stratsave": if (!stratEdit.text.trim()) { window.toast("A strategy needs some words"); break; } stratEditing = null; send("stratedit", { v, text: stratEdit.text, when: stratEdit.when }); render(); window.toast("Strategy saved"); break;
+      case "stratcancel": stratEditing = null; render(); break;
+      case "sgedit": { const g = ((S.stratSuggest || {}).list || []).find(x => x.id === v); if (g) { sgEdit[v] = { text: g.text, when: g.when || "" }; render(); } break; }
+      case "sgcancel": delete sgEdit[v]; render(); break;
+      case "sgkeep": { const e2 = sgEdit[v]; delete sgEdit[v]; send("stratkeep", Object.assign({ v }, e2 ? { text: e2.text, when: e2.when } : {})); render(); window.toast("Added to your strategies"); break; }
+      case "sgdismiss": delete sgEdit[v]; send("stratdismiss", { v }); break;
+      case "sgrefresh": send("stratsuggest", {}); break;
       case "stratretire": send("stratretire", { v }); window.toast("Retired. It's kept under Retired strategies"); break;
       case "stratrestore": send("stratrestore", { v }); break;
       case "stratdelete":
@@ -3076,6 +3179,7 @@ function clientApp() {
     if (el.classList && el.classList.contains("fold-sec")) { const f = Object.assign({}, S.settings.ideasFold || {}); f[el.dataset.fold] = !el.open; if (!!(S.settings.ideasFold || {})[el.dataset.fold] !== !el.open) { S.settings.ideasFold = f; send("set", { k: "ideasFold", v: f }); } return; }
     if (el.classList && el.classList.contains("fl-story")) { if (el.open) dgOpen.add(el.dataset.k); else dgOpen.delete(el.dataset.k); } }, true);
   document.addEventListener("change", e => {
+    if (e.target.id === "stratEvery") { const v2 = +e.target.value; S.cfg.stratEvery = v2; send("cfg", { k: "stratEvery", v: v2 }); window.toast(v2 ? `Suggestions refresh every ${v2 >= 24 ? (v2 / 24 === 1 ? "day" : v2 / 24 + " days") : v2 + " hours"}` : "Suggestions refresh only when you tap Refresh"); return; }
     if (e.target.id === "homeCur") { S.fx = Object.assign({}, S.fx, { choice: e.target.value }); send("set", { k: "homeCur", v: e.target.value }); window.toast("Converting to " + (e.target.value === "auto" ? "your main currency" : e.target.value) + "…"); return; }
     if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
     if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
@@ -3541,6 +3645,17 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .idea-t{margin-top:10px}
 .idea .rangebox{margin-top:8px}
 /* My strategies */
+.idea-trend{margin:14px 0 6px;line-height:1.65}
+.idea-trend .chip{margin-right:4px;vertical-align:1px}
+.sg-box{border:1px dashed color-mix(in srgb, var(--signal) 45%, var(--rule));border-radius:12px;padding:10px 12px;margin:12px 0 6px;background:color-mix(in srgb, var(--signal-wash) 45%, transparent)}
+.sg-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
+.strat-c.sg{border-top:1px solid var(--rule)}
+.strat-c.editing textarea,.sg-in{display:block;width:100%;margin:6px 0;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);resize:vertical;-webkit-user-select:text;user-select:text}
+.sg-tk{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px}
+.sg-tk .chip{background:var(--paper);box-shadow:inset 0 0 0 1px var(--rule);color:var(--ink)}
+.sg-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid var(--rule);padding-top:10px;margin-top:6px}
+.sg-every{display:flex;align-items:center;gap:8px;font-size:calc(13px * var(--ts));color:var(--muted);font-weight:600}
+
 .strat{background:var(--sheet);border:1px solid var(--rule);border-left:4px solid var(--amber);border-radius:12px;padding:var(--pad);margin:10px 0 16px}
 .strat-c{border-top:1px solid var(--rule);padding:10px 0 4px}
 .strat-c.retired{opacity:.7}
@@ -4001,7 +4116,8 @@ async function bootApp(isClosed) {
     if (isClosed() || !dataLoaded) return;
     if (stocks.length && settings.refreshOnOpen !== false && Date.now() - (settings.lastRefresh || 0) > cfg("pricesFreshMin") * 60e3)
       runRefresh(false).catch(e => toast(String(e.message || e)));
-    else if (settings.ai && aiKey() && briefingDue()) runBriefing(false);
+    else if (settings.ai && aiKey() && briefingDue()) runBriefing(false).then(() => runStratSuggest(false));
+    else runStratSuggest(false);
   });
   Timer.schedule(3500, false, () => {
     if (isClosed() || updateChecked) return;

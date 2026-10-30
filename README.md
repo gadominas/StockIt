@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.9.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.10.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -111,7 +111,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 📊 **A page per stock** | 1D, 1W, 1M, 6M, 1Y and 5Y chart you can touch to see the price at any moment, whether its market is open, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 50- and 200-day averages, RSI, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
 | 🕒 **Markets** | Every stock shows whether its market is open right now. The Markets tab lists the markets where your stocks trade, then 16 others, each with a countdown to its next open or close, its hours in local and your time, and the trading day's progress. |
-| 🧭 **My strategies** | Write down your own plans in Ideas, such as "when Nike recovers, sell it and buy a pharma company", with an optional timing. ✦ Ideas serve them and say where each one stands; the briefing and stories take them into account. Retire a strategy when it's done. |
+| 🧭 **My strategies** | ✦ Suggested strategies drawn from your portfolio, watchlist and plans, refreshed every day (or as often as you choose); keep any as your own. Or write down your own plans in Ideas, such as "when Nike recovers, sell it and buy a pharma company", with an optional timing. ✦ Ideas serve them and say where each one stands; the briefing and stories take them into account. Retire a strategy when it's done. |
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
 | 🎧 **Listen to a stock's news** | Tap a stock in Flash: Stockit reads three of its articles in full (skipping any it can't open) and ✦ AI tells them as one spoken story of 350 to 550 words, naming its sources, then what it could mean for the stock. The story then appears under the card with its sources. Without a key, each article's key sentences are read in turn. |
@@ -214,7 +214,13 @@ In **Ideas › My strategies**, write down your own plans and directions, in you
 - "When Nike recovers to my average price, sell it and buy a pharmaceutical company" (timing: "when NKE is back at $80").
 - "Over the next six months, invest more in pharma companies that work closely with AI companies."
 
-All your strategies are listed there. **Retire** one when it's done or no longer what you want; retired strategies stay under **Retired strategies**, where you can bring them back or delete them.
+All your strategies are listed there. **Edit** one any time to change its words or timing. **Retire** one when it's done or no longer what you want; retired strategies stay under **Retired strategies**, where you can bring them back or delete them.
+
+**✦ Suggested for you.** With an AI key, Stockit suggests three new strategies (one to five, in **Settings › Strategy suggestions**) from your portfolio, watchlist, your own strategies, your themes and today's prices in your currency. Each is written the way you'd write it, with a timing, the numbers behind it and the tickers involved (tap one to open it). **Keep** it as it is, **Edit, then keep** to make it yours first, or **Dismiss** it.
+
+Suggestions refresh on their own, so they're never stale: every day by default, or every 6 hours, 12 hours, 2 days, or only when you tap **Refresh now**. You choose right under the suggestions. They refresh when Stockit opens, after a refresh, or when you open Ideas, and each refresh also updates **Where it stands** for your own strategies.
+
+<p align="center"><img src="docs/screenshots/30-suggested-strategies.png" width="250" alt="Three suggested strategies, each with its timing, reasons and tickers, and Keep, Edit then keep and Dismiss"></p>
 
 With an AI key, your active strategies come first when Stockit looks for ✦ ideas: ideas serve them, each says which strategy it is for, and every strategy gets a short **Where it stands**, such as how far a stock is from your average price. The daily briefing and stock stories take your strategies into account too.
 
@@ -322,6 +328,8 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Check Stockit against your broker | Tap the **✓ shield** on your portfolio, add screenshots, tap **Check**, then apply or ignore each suggestion |
 | Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |
 | Change the themes for ideas | **Ideas › Themes you like** |
+| Take a suggested strategy | **Ideas › My strategies › Suggested for you**, **Keep** or **Edit, then keep** |
+| Change how often suggestions refresh | The **Refresh every** menu under the suggestions |
 | Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
 | Put a plan aside | **Retire** on the strategy; bring it back from **Retired strategies** |
 | Scan the news | Open **Flash** |
