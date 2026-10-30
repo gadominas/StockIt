@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.14.0';
+const VERSION = '1.15.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -42,7 +42,7 @@ const KC_UPDATE_SNOOZE = 'stockit-update-snooze';   // Keychain key, unique per 
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
   { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.0.0' },
-  { id: 'settings', name: 'Settings', version: '1.0.0', since: '1.0.0' },
+  { id: 'settings', name: 'Settings', version: '1.1.0', since: '1.15.0' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
@@ -2612,6 +2612,20 @@ function clientApp() {
         <div class="grow"><b>All blueprints</b><small class="muted">${esc(S.blueprintsRepo.replace("https://", ""))}</small></div><span class="chev" aria-hidden="true">›</span></button>`;
   }
   const sw = (k, label, help) => `<div class="srow"><div class="grow"><b>${label}</b><small class="muted">${help}</small></div><button class="switch ${S.settings[k] ? "on" : ""}" data-act="toggle" data-v="${k}" aria-label="${label}"></button></div>`;
+  // Settings blueprint 1.1.0: each section's rows in one card (.grp), built right after every render.
+  // A heading's explanation (p.hint right under it) and the changed-count footer (.cfg-foot) stay outside.
+  function cardSections(body) {
+    if (!body) return;
+    var inSec = false, grp = null, kids = Array.prototype.slice.call(body.children);
+    kids.forEach(function (n) {
+      var c = n.classList;
+      if (n.tagName === "H3" && c.contains("sec")) { inSec = true; grp = null; return; }
+      if (!inSec || c.contains("grp") || c.contains("cfg-foot")) { grp = null; return; }
+      if (!grp && n.tagName === "P" && c.contains("hint")) return;
+      if (!grp) { grp = document.createElement("div"); grp.className = "grp"; body.insertBefore(grp, n); }
+      grp.appendChild(n);
+    });
+  }
   function renderCfg() {
     const el = $("#cfgsheet"), keepTop = el.scrollTop;
     el.classList.toggle("open", cfgOpen); lockBody();
@@ -2662,6 +2676,7 @@ function clientApp() {
         ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
       ${builtWithHTML()}
     </div>`;
+    cardSections(el.querySelector(".sh-body"));   // Settings 1.1.0: one card per section
     el.scrollTop = keepTop;   // re-renders must not jump the user back to the top
   }
 
@@ -3530,6 +3545,12 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .cfgin.wide{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
 .cfg-foot{margin-top:18px}
+/* Settings blueprint 1.1.0: sections are cards under small muted capitals */
+#cfgsheet h3.sec{font:700 calc(12.5px * var(--ts, 1))/1.2 var(--sans, -apple-system, system-ui, sans-serif);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:28px 4px 8px}
+#cfgsheet .grp{background:var(--sheet);border:1px solid var(--rule);border-radius:16px;padding:0 16px;overflow:hidden}
+#cfgsheet .grp>*:last-child{border-bottom:0}
+#cfgsheet .grp .lk-row{margin:0;padding:12px 0;border-bottom:1px solid var(--rule)}
+#cfgsheet .cfg-foot{margin:10px 4px 0}
 .srow.bp{width:100%;text-align:left}
 .chev{flex:none;color:var(--muted);font-size:calc(20px * var(--ts));line-height:1}
 .field{display:flex;gap:8px;margin-top:12px}
