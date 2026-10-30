@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - All your money in one currency of your choice (euros, dollars, …), in the app and the widget
  *  - Charts from one day to five years; touch to see the price at any moment
  *  - Whether each stock's market is open now, and a Markets tab with every market's opening and closing countdown
  *  - My strategies: your own plans in Ideas, kept or retired, and taken into account by ✦ ideas, briefing and stories
@@ -25,7 +26,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -198,14 +199,14 @@ async function load(n, def, waitMs = 10000) {
 // Data files are only written once they were read, so a slow start can never save an empty list over them.
 let dataLoaded = false;
 const write = (n, v) => {
-  if (n === "settings" ? !settingsOk : (["stocks", "market", "insights", "tldrs", "usage", "strategies"].includes(n) && !dataLoaded)) return;
+  if (n === "settings" ? !settingsOk : (["stocks", "market", "insights", "tldrs", "usage", "strategies", "fx"].includes(n) && !dataLoaded)) return;
   fm.writeString(P(n), JSON.stringify(v));
 };
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
   { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {},    // remembered picks; flashFold: symbol → newest headline time when folded
-    refreshOnOpen: true, widgetMoney: false,                                    // Portfolio
+    refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
     ai: true, aiProvider: "anthropic",                                          // AI configuration
@@ -223,6 +224,7 @@ let stocks = [];        // [{ s, name, exch, list: "own" | "watch", sh, cost, ad
 let market = {};        // per symbol: price, prev, pts, f (fundamentals), prof, news, crowd
 let insights = { briefing: null, stories: {}, ideas: null };   // AI output, with provider and time
 let tldrs = {};         // TL;DRs and news stories by headline link, newest 150 kept
+let fxRates = {};       // exchange rates to your currency: { "USDEUR": { rate, prev, at } }
 let strategies = [];    // the investor's own plans: [{ id, text, when, status: "active" | "retired", at, retiredAt }]
 async function loadData() {
   loadIssues.length = 0;
@@ -232,6 +234,7 @@ async function loadData() {
   insights.stories = insights.stories || {};
   tldrs = await load("tldrs", {});
   strategies = await load("strategies", []);
+  fxRates = await load("fx", {});
   usage = await load("usage", usage);
   dataLoaded = loadIssues.length === 0;   // anything missing: show what we have, save nothing over it
 }
@@ -422,6 +425,35 @@ async function loadNews(sym) {
   m.newsAt = Date.now();
 }
 
+// ---------- exchange rates: everything you own in one currency ----------
+const HOME_CURS = ["EUR", "USD", "GBP", "CHF", "SEK", "NOK", "DKK", "PLN", "JPY", "CAD", "AUD", "HKD"];
+function homeCur() {   // your choice, or the currency most of your money is in
+  if (settings.homeCur && settings.homeCur !== "auto") return settings.homeCur;
+  const by = {};
+  for (const x of stocks) { const m = market[x.s]; if (x.list === "own" && x.sh > 0 && m && m.price != null) { const [c, k] = normCur(m.cur); by[c] = (by[c] || 0) + x.sh * m.price / k; } }
+  const top = Object.entries(by).sort((a, b) => b[1] - a[1])[0];
+  return top ? top[0] : (stocks[0] && normCur((market[stocks[0].s] || {}).cur)[0]) || "USD";
+}
+// From a stock's currency to yours: 1 for the same currency, null when the rate isn't known yet. prev: yesterday's rate.
+function fxRate(cur, prev, home = homeCur()) {
+  const [c, k] = normCur(cur);
+  if (c === home) return 1 / k;
+  const r = fxRates[c + home];
+  return r && r.rate ? (prev ? (r.prev || r.rate) : r.rate) / k : null;
+}
+async function loadFx(force = false) {
+  const home = homeCur();
+  const curs = [...new Set(stocks.map(x => normCur((market[x.s] || {}).cur)[0]).filter(c => c && c !== home))];
+  await pool(curs.filter(c => force || !fxRates[c + home] || Date.now() - fxRates[c + home].at > 30 * 60e3), 3, async c => {
+    try {
+      const { meta, pts } = await yChart(`${c}${home}=X`, "5d", "1d");
+      const q = priceFrom(meta, pts);
+      if (q.price) fxRates[c + home] = { rate: q.price, prev: q.prev || q.price, at: Date.now() };
+    } catch (e) { console.log(`Rate ${c}→${home}: ${e}`); }
+  });
+  write("fx", fxRates);
+}
+
 // ---------- the crowd's mood: StockTwits posts tagged bullish or bearish ----------
 async function loadCrowd(sym) {
   const m = market[sym];
@@ -465,6 +497,7 @@ async function addStocks(items, list) {
     if (it.sh > 0) { x.sh = it.sh; if (it.cost > 0) x.cost = it.cost; }
     stocks.push(x); res.added.push(r.s);
     try { await loadPrices(r.s); } catch (e) { market[r.s] = Object.assign(market[r.s] || {}, { err: String(e.message || e).slice(0, 80) }); }
+    await loadFx().catch(() => {});   // a new currency's rate (cached ones are skipped)
     loadNews(r.s).catch(() => {});
   });
   if (res.added.length) await loadFundamentals(res.added).catch(() => {});
@@ -528,6 +561,7 @@ async function runRefresh(force = false) {
       }
       call("onProgress", ++done, syms.length);
     });
+    await loadFx(force).catch(e => console.log("Exchange rates: " + e));
     const stale = syms.filter(s => market[s] && (force || !market[s].fAt || Date.now() - market[s].fAt > cfg("fundHours") * 3600e3));
     if (stale.length) await loadFundamentals(stale).catch(e => console.log(String(e)));
     for (const k of Object.keys(market)) if (!syms.includes(k)) delete market[k];
@@ -646,18 +680,21 @@ const STYLE = {
   adventurous: "adventurous: accepts big swings for bigger long-term growth",
 };
 const SIGNALS = ["buy", "hold", "sell"], CONF = ["low", "medium", "high"];
+// What you own, in your currency (Settings › Portfolio). Stocks whose exchange rate isn't known yet are kept apart, in their own currency.
 function totals() {
-  const by = {};
+  const home = homeCur(), by = {};
   for (const x of stocks) {
     const m = market[x.s];
     if (x.list !== "own" || !(x.sh > 0) || !m || m.price == null) continue;
-    const [cur, k] = normCur(m.cur);
-    const t = by[cur] = by[cur] || { cur, value: 0, day: 0, cost: 0, costKnown: true, n: 0 };
-    t.value += x.sh * m.price / k; t.n++;
-    if (m.prev) t.day += x.sh * (m.price - m.prev) / k;
-    if (x.cost > 0) t.cost += x.sh * x.cost / k; else t.costKnown = false;
+    const [cur, k] = normCur(m.cur), r = fxRate(m.cur, false, home), rp = fxRate(m.cur, true, home);
+    const key = r != null ? home : cur, f = r != null ? r : 1 / k, fp = r != null ? rp : 1 / k;
+    const t = by[key] = by[key] || { cur: key, value: 0, day: 0, cost: 0, costKnown: true, n: 0, mixed: false };
+    t.value += x.sh * m.price * f; t.n++;
+    if (r != null && normCur(m.cur)[0] !== home) t.mixed = true;
+    if (m.prev) t.day += x.sh * (m.price * f - m.prev * fp);   // in your currency: the stock's move and the currency's
+    if (x.cost > 0) t.cost += x.sh * x.cost * f; else t.costKnown = false;   // what you paid, at today's rate
   }
-  return Object.values(by).sort((a, b) => b.value - a.value);
+  return Object.values(by).sort((a, b) => (b.cur === home) - (a.cur === home) || b.value - a.value);
 }
 const fx = (v, d = 2) => v == null || !isFinite(v) ? "n/a" : (+v).toFixed(Math.abs(v) >= 1000 ? 0 : d);
 const sx = v => v == null || !isFinite(v) ? "n/a" : (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
@@ -1168,6 +1205,9 @@ function clientState() {
     briefing: insights.briefing ? Object.assign({}, insights.briefing, { stocks: undefined, stale: insights.briefing.sig !== briefingSig() }) : null,
     ideas: insights.ideas,
     strategies,
+    fx: (() => { const home = homeCur(), rates = {};
+      for (const [k, r] of Object.entries(fxRates)) if (k.endsWith(home) && k.length === home.length + 3) rates[k.slice(0, 3)] = { rate: r.rate, prev: r.prev, at: r.at };
+      return { home, choice: settings.homeCur || "auto", rates, curs: HOME_CURS }; })(),
     busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy] },
     ai: {
       provider: settings.aiProvider,
@@ -1259,8 +1299,10 @@ async function handle(m) {
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
         settings.flashFold = Object.fromEntries(Object.entries(m.v).filter(([s, t]) => stocks.some(x => x.s === s) && isFinite(t)));
+      if (m.k === "homeCur" && (m.v === "auto" || HOME_CURS.includes(m.v))) settings.homeCur = m.v;
       write("settings", settings);
-      if (m.k === "widgetMoney") saveWidget(widgetSnapshot());
+      if (m.k === "homeCur") { await loadFx().catch(() => {}); push(); }
+      if (m.k === "widgetMoney" || m.k === "homeCur") saveWidget(widgetSnapshot());
       return;
     case "cfg": {
       if (m.k === "*") settings.cfg = {}; else setCfg(m.k, m.v);
@@ -1530,13 +1572,31 @@ function clientApp() {
   // ---- numbers and time ----
   const nf = (v, d = 2) => v == null || !isFinite(v) ? "—" : (+v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
   const MINOR = { GBp: "p", GBX: "p", ILA: " ag", ZAc: " c" };
-  function money(v, cur, compact) {
+  function money(v, cur, compact, dec) {   // dec: fixed decimals (amounts of money); prices under 1 otherwise get 4
     if (v == null || !isFinite(v)) return "—";
     if (MINOR[cur]) return nf(v, 2) + MINOR[cur];
-    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: cur || "USD", notation: compact ? "compact" : "standard", maximumFractionDigits: compact ? 1 : (Math.abs(v) < 1 ? 4 : 2) }).format(v); }
+    try { return new Intl.NumberFormat(undefined, { style: "currency", currency: cur || "USD", notation: compact ? "compact" : "standard", maximumFractionDigits: compact ? 1 : dec != null ? dec : (Math.abs(v) < 1 ? 4 : 2) }).format(v); }
     catch (e) { return nf(v) + " " + (cur || ""); }
   }
-  const signed = (v, cur) => v == null || !isFinite(v) ? "—" : (v >= 0 ? "+" : "−") + money(Math.abs(v), cur);
+  // Your money in one currency (Settings › Portfolio): rates come with the state; a stock whose rate isn't known yet keeps its own currency.
+  const NORMC = { GBp: ["GBP", 100], GBX: ["GBP", 100], ILA: ["ILS", 100], ZAc: ["ZAR", 100] };
+  const HOME = () => (S.fx && S.fx.home) || "USD";
+  function fxr(cur, prev) {
+    const [c, k] = NORMC[cur] || [cur || "USD", 1];
+    if (c === HOME()) return 1 / k;
+    const r = S.fx && S.fx.rates && S.fx.rates[c];
+    return r && r.rate ? (prev ? (r.prev || r.rate) : r.rate) / k : null;
+  }
+  const inHome = (v, cur) => { const r = fxr(cur); return v == null || r == null ? null : v * r; };
+  const foreign = cur => (NORMC[cur] || [cur || "USD"])[0] !== HOME();
+  const posHome = x => x.list === "own" && x.sh && x.price != null ? inHome(x.sh * x.price, x.cur) : null;
+  const dayHome = x => x.list === "own" && x.sh && x.price != null && x.prev != null && fxr(x.cur) != null ? x.sh * (x.price * fxr(x.cur) - x.prev * fxr(x.cur, true)) : null;
+  const homeMoney = (v, cur, compact, signedV) => {   // in your currency first, the stock's own currency small beside it
+    const h = inHome(v, cur), f = signedV ? signed : money;
+    if (h == null) return f(v, cur, compact);
+    return f(h, HOME(), compact) + (foreign(cur) ? `<small class="orig">${f(v, cur, compact)}</small>` : "");
+  };
+  const signed = (v, cur) => v == null || !isFinite(v) ? "—" : (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, false, 2);
   const pct = (v, d = 2) => v == null || !isFinite(v) ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + "%";
   const bigN = v => v == null || !isFinite(v) ? "—" : v >= 1e12 ? nf(v / 1e12, 2) + "T" : v >= 1e9 ? nf(v / 1e9, 1) + "B" : v >= 1e6 ? nf(v / 1e6, 0) + "M" : nf(v, 0);
   const dayPct = x => x && x.price != null && x.prev ? (x.price / x.prev - 1) * 100 : null;
@@ -1775,7 +1835,7 @@ function clientApp() {
 
   // ---- portfolio and watchlist ----
   function sortRows(items) {
-    const val = x => x.list === "own" && x.sh && x.price != null ? x.sh * x.price : -1;
+    const val = x => x.list === "own" && x.sh && x.price != null ? (posHome(x) != null ? posHome(x) : x.sh * x.price) : -1;
     const rank = { buy: 0, hold: 1, sell: 2 };
     const k = tab === "watch" && sort === "value" ? "today" : sort;
     return items.slice().sort((a, b) =>
@@ -1798,7 +1858,7 @@ function clientApp() {
   }
   function row(x) {
     const d = dayPct(x), c = cls(d);
-    const sub = x.list === "own" && x.sh && x.price != null ? `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${money(x.sh * x.price, x.cur, true)}` : esc(x.name);
+    const ph = posHome(x), sub = x.list === "own" && x.sh && x.price != null ? `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${ph != null ? money(ph, HOME(), true) : money(x.sh * x.price, x.cur, true)}` : esc(x.name);
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
     return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
@@ -1817,14 +1877,14 @@ function clientApp() {
         <p class="note">Add how many shares you own (open a stock › Edit shares) to see your portfolio's value.</p></section>`;
     }
     const t = T[0], dp = t.value - t.day ? t.day / (t.value - t.day) * 100 : null;
-    const main = items.filter(x => x.sh && x.price != null && (x.cur === t.cur || (x.cur === "GBp" && t.cur === "GBP")));
-    const vals = main.map(x => [x.s, x.sh * x.price / (x.cur === "GBp" ? 100 : 1)]).sort((a, b) => b[1] - a[1]);
+    const vals = items.map(x => [x.s, t.cur === HOME() ? posHome(x) : null]).filter(v => v[1] != null).sort((a, b) => b[1] - a[1]);
     const shown = vals.slice(0, 6), rest = vals.slice(6).reduce((a, b) => a + b[1], 0);
     if (rest > 0) shown.push(["Other", rest]);
-    return `<section class="sum"><span class="sum-k">Portfolio value</span><div class="sum-v">${money(t.value, t.cur)}</div>
+    return `<section class="sum"><span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${money(t.value, t.cur)}</div>
       <div class="sum-d ${cls(t.day)}">${signed(t.day, t.cur)} (${pct(dp)}) today</div>
       ${t.costKnown && t.cost ? `<div class="sum-g">${signed(t.value - t.cost, t.cur)} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
-      ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => money(z.value, z.cur)).join(" and ")} in other currencies</p>` : ""}
+      ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => money(z.value, z.cur)).join(" and ")} until their exchange rates load</p>` : ""}
+      ${t.mixed ? `<p class="note">Stocks in other currencies at today's exchange rates. Change the currency in <button class="link small" data-act="cfgopen">Settings › Portfolio</button>.</p>` : ""}
       ${shown.length > 1 ? `<div class="alloc" aria-hidden="true">${shown.map((v, i) => `<i style="flex:${v[1].toFixed(2)};background:color-mix(in srgb, var(--signal) ${Math.max(18, 100 - i * 13)}%, var(--sheet))"></i>`).join("")}</div>
         <div class="alloc-l">${shown.map((v, i) => `<span><i style="background:color-mix(in srgb, var(--signal) ${Math.max(18, 100 - i * 13)}%, var(--sheet))"></i>${esc(v[0])} ${(v[1] / t.value * 100).toFixed(0)}%</span>`).join("")}</div>` : ""}
     </section>`;
@@ -1934,11 +1994,12 @@ function clientApp() {
   function holdingHTML(x) {
     if (x.list !== "own") return "";
     if (!x.sh) return `<section class="hold"><p class="muted">How many shares do you own? Add them to see your value and gain.</p><button class="sm primary" data-act="holding" data-v="${esc(x.s)}">Add shares</button></section>`;
-    const v = x.price != null ? x.sh * x.price : null, g = x.cost && v != null ? v - x.sh * x.cost : null;
+    const v = x.price != null ? x.sh * x.price : null, g = x.cost && v != null ? v - x.sh * x.cost : null, dh = dayHome(x);
     return `<section class="hold"><div class="hold-g">
-      <div><small>Shares</small><b>${nf(x.sh, x.sh % 1 ? 2 : 0)}</b></div><div><small>Value</small><b>${money(v, x.cur)}</b></div>
-      <div><small>Today</small><b class="${cls(dayPct(x))}">${x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—"}</b></div>
-      <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? signed(g, x.cur) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
+      <div><small>Shares</small><b>${nf(x.sh, x.sh % 1 ? 2 : 0)}</b></div><div><small>Value</small><b>${homeMoney(v, x.cur)}</b></div>
+      <div><small>Today</small><b class="${cls(dh != null ? dh : dayPct(x))}">${dh != null ? signed(dh, HOME()) + (foreign(x.cur) ? `<small class="orig">${signed(x.sh * (x.price - x.prev), x.cur)}</small>` : "") : x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—"}</b></div>
+      <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? homeMoney(g, x.cur, false, true) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
+      ${foreign(x.cur) && fxr(x.cur) != null ? `<p class="note">In ${esc(HOME())} at today's rate; the stock trades in ${esc(x.cur)}.</p>` : ""}
       ${x.cost ? `<p class="note">Average price ${money(x.cost, x.cur)}</p>` : ""}</section>`;
   }
   function signalHTML(x) {
@@ -2067,6 +2128,8 @@ function clientApp() {
       <h3 class="sec">Appearance</h3>${lookHTML()}
       <h3 class="sec">Portfolio</h3>
       ${sw("refreshOnOpen", "Refresh when Stockit opens", "Off: prices and news load only when you tap refresh")}
+      <div class="srow"><div class="grow"><b>Show your money in</b><small class="muted">Portfolio value, today and gains, here and in the widget. Stocks in other currencies are converted at today's rate. ${S.fx && S.fx.choice === "auto" ? `Auto uses the currency most of your money is in (now ${esc(HOME())}).` : ""}</small></div>
+        <select id="homeCur" class="cursel" aria-label="Currency">${[["auto", "Auto"]].concat(((S.fx && S.fx.curs) || []).map(c2 => [c2, c2])).map(([v, l]) => `<option value="${v}" ${(S.fx && S.fx.choice) === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${sw("widgetMoney", "Show portfolio value in the widget", "Off: the widget shows only percentages, never amounts")}
       <h3 class="sec">News and signals</h3>
       ${sw("newsYahoo", "Yahoo Finance headlines", "Business news about each stock")}
@@ -2161,7 +2224,7 @@ function clientApp() {
   }
   const topNews = x => rankNews(x).slice(0, S.cfg.flashPerStock || 3);
   const flashOrder = () => S.stocks.slice().sort((a, b) => (a.list === "own" ? 0 : 1) - (b.list === "own" ? 0 : 1)
-    || ((b.sh || 0) * (b.price || 0)) - ((a.sh || 0) * (a.price || 0)) || a.s.localeCompare(b.s));
+    || (posHome(b) || 0) - (posHome(a) || 0) || a.s.localeCompare(b.s));
   // A folded card stays folded until a newer headline arrives; then it opens again, marked New.
   const fold = () => S.settings.flashFold || {};
   const newest = x => Math.max(0, ...topNews(x).map(h => h.at || 0));
@@ -2173,10 +2236,10 @@ function clientApp() {
   }
   const ratingWord = r => { const m = String(r || "").match(/^\s*([\d.]+)\s*-\s*(.+)$/); return m ? [m[2].trim(), m[1]] : r ? [String(r), ""] : null; };
   function flashFacts(x) {   // the left column: your position, today's money, Stockit's view, analysts and the crowd
-    const d = dayPct(x), own = x.list === "own" && x.sh, todayMoney = own && x.prev != null && x.price != null ? x.sh * (x.price - x.prev) : null;
+    const d = dayPct(x), own = x.list === "own" && x.sh, dh = own ? dayHome(x) : null, todayMoney = dh != null ? dh : own && x.prev != null && x.price != null ? x.sh * (x.price - x.prev) : null, tmCur = dh != null ? HOME() : x.cur;
     const r = ratingWord(x.f && x.f.rating), c = x.crowd, crowd = c && c.bull + c.bear >= 5 ? Math.round(c.bull / (c.bull + c.bear) * 100) : null;
     return `<span class="pill ${cls(d)}">${pct(d)}</span>
-      ${own ? `<span class="fl-k">${nf(x.sh, x.sh % 1 ? 2 : 0)} share${x.sh === 1 ? "" : "s"}</span><span class="fl-m ${cls(todayMoney)}">${todayMoney != null ? signed(todayMoney, x.cur) + " today" : ""}</span>`
+      ${own ? `<span class="fl-k">${nf(x.sh, x.sh % 1 ? 2 : 0)} share${x.sh === 1 ? "" : "s"}</span><span class="fl-m ${cls(todayMoney)}">${todayMoney != null ? signed(todayMoney, tmCur) + " today" : ""}</span>`
         : x.list !== "own" ? `<span class="fl-k">Watching</span>` : `<span class="fl-k">Shares not set</span>`}
       ${x.sig ? sigChip(x.sig) : x.trend ? `<span class="chip t-${x.trend.trend}">${TREND[x.trend.trend]}</span>` : ""}
       ${r ? `<span class="fl-r" title="Average analyst rating">Analysts <b>${esc(r[0])}</b>${r[1] ? ` <span class="muted">${esc(r[1])}</span>` : ""}</span>` : ""}
@@ -2629,6 +2692,7 @@ function clientApp() {
   // Typed values and menus arrive through "change"
   document.addEventListener("toggle", e => { const el = e.target; if (el.classList && el.classList.contains("fl-story")) { if (el.open) dgOpen.add(el.dataset.k); else dgOpen.delete(el.dataset.k); } }, true);
   document.addEventListener("change", e => {
+    if (e.target.id === "homeCur") { S.fx = Object.assign({}, S.fx, { choice: e.target.value }); send("set", { k: "homeCur", v: e.target.value }); window.toast("Converting to " + (e.target.value === "auto" ? "your main currency" : e.target.value) + "…"); return; }
     if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
     if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
     if (e.target.classList && e.target.classList.contains("ttsinstr")) { S.settings.ttsInstructions = e.target.value.trim(); send("set", { k: "ttsInstructions", v: S.settings.ttsInstructions }); return; }
@@ -2987,6 +3051,8 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .tl-listen{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0 18px}
 .primary.block{display:block;width:100%;text-align:center;padding:13px 16px;margin:6px 0 4px}
 .err{color:var(--danger)}
+.cursel{font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:7px 8px;flex:none}
+.orig{display:block;font-size:calc(12px * var(--ts));font-weight:500;color:var(--muted);margin-top:1px}
 /* Market open or closed */
 .mk{display:inline-flex;align-items:center;gap:5px;font-size:calc(11.5px * var(--ts));font-weight:700;color:var(--muted);white-space:nowrap}
 .mk::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.7}

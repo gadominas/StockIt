@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.5.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -107,7 +107,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | | |
 |---|---|
 | 💼 **Portfolio and watchlist** | Two tabs: stocks you own, with shares and average price, and stocks you watch. Each row shows the price, today's change, a one-month trend line and Stockit's view. Sort by value, today's move, signal or A–Z. |
-| 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings. |
+| 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings, all in **one currency you choose** (euros, dollars, pounds and more), whichever markets your stocks trade on. |
 | 📊 **A page per stock** | 1D, 1W, 1M, 6M, 1Y and 5Y chart you can touch to see the price at any moment, whether its market is open, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
 | 🕒 **Markets** | Every stock shows whether its market is open right now. The Markets tab lists the markets where your stocks trade, then 16 others, each with a countdown to its next open or close, its hours in local and your time, and the trading day's progress. |
@@ -128,6 +128,15 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## One currency for everything
+
+If you own stocks on several markets, Stockit adds them all up in one currency. Choose it in **Settings › Portfolio › Show your money in**: **Auto** (the currency most of your money is in), EUR, USD, GBP, CHF, SEK, NOK, DKK, PLN, JPY, CAD, AUD or HKD.
+
+- **Portfolio value, today and since you bought** are in that currency, here and in the widget (when **Show portfolio value in the widget** is on).
+- Each stock's page shows its value, today and gain in your currency, with the stock's own currency underneath. Its price stays in the currency it trades in.
+- Exchange rates come from Yahoo Finance with your prices. Today's change includes the currency's own move since yesterday; what you paid is converted at today's rate.
+- London prices quoted in pence are converted to pounds first.
 
 ## Charts you can touch
 
@@ -267,6 +276,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Find new ideas | Open **✦ Ideas** and tap **Find new ideas**; **Add to watchlist** keeps one |
 | Change shares or move a stock | Open the stock › **Manage** › **Edit shares**, **Move to watchlist** or **Remove** |
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
+| See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
 | Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
 | Put a plan aside | **Retire** on the strategy; bring it back from **Retired strategies** |
@@ -332,6 +342,7 @@ Stockit follows five shared blueprints: in-app updates, settings, AI configurati
 | Problem | Try this |
 |---|---|
 | Stockit opens to a blank or loading screen | Close it and open it again. If it keeps happening, open **Settings › Updates › Start-up log** and send what it shows |
+| Some money shows "until their exchange rates load" | That currency's rate hasn't loaded yet. Tap refresh; it's kept for 30 minutes after that |
 | A market shows open on a public holiday | Holidays are known for markets where you hold stocks, after a refresh; other markets follow their regular weekly hours |
 | A stock isn't found | Use its Yahoo Finance ticker, with the exchange suffix outside the US (`ASML.AS`, `VWCE.DE`) |
 | "Updated; couldn't load …" | That source didn't answer. Tap refresh again in a minute; the last loaded data stays on screen |
