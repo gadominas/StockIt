@@ -27,7 +27,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -221,7 +221,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {},    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0,    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1146,23 +1146,16 @@ function toJPEG(img, maxSide = 1600) {
   dc.drawImageInRect(img, new Rect(0, 0, dc.size.width, dc.size.height));
   return Data.fromJPEG(dc.getImage()).toBase64String();
 }
-async function pickScreenshots(max) {
-  const out = [];
-  while (out.length < max) {
-    let img;
-    try { img = await Photos.fromLibrary(); } catch (e) { break; }   // cancelled
-    if (!img) break;
-    out.push(toJPEG(img));
-    if (out.length >= max) break;
-    const a = new Alert();
-    a.title = `${out.length} screenshot${out.length === 1 ? "" : "s"} chosen`;
-    a.message = "If your portfolio takes more than one screen, add the next screenshot too.";
-    a.addAction("Check these"); a.addAction("Add another screenshot"); a.addCancelAction("Cancel");
-    const r = await a.present();
-    if (r === -1) return [];
-    if (r === 0) break;
-  }
-  return out;
+// Screenshots chosen for a check, one at a time, shown to you before anything is read; kept for this run only.
+let checkShots = [];   // [{ full: base64 JPEG for AI, thumb: small base64 JPEG for the page }]
+async function addCheckShot() {
+  if (checkBusy) return;
+  if (checkShots.length >= cfg("checkMaxShots")) return toast(`Up to ${cfg("checkMaxShots")} screenshots per check (Settings › Portfolio check)`);
+  let img;
+  try { img = await Photos.fromLibrary(); } catch (e) { return; }   // cancelled
+  if (!img) return;
+  checkShots.push({ full: toJPEG(img, 1600), thumb: toJPEG(img, 360) });
+  push();
 }
 async function ensureRate(cur) {   // a rate to your currency for a screenshot's currency, if Stockit doesn't have it yet
   const [c] = normCur(cur), home = homeCur();
@@ -1189,10 +1182,13 @@ function matchPosition(p, pool2) {
 async function runCheck() {
   if (checkBusy) return;
   if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
-  const shots = await pickScreenshots(cfg("checkMaxShots"));
-  if (!shots.length) return;
+  const shots = checkShots.map(x => x.full);
+  if (!shots.length) return toast("Add a screenshot first");
+  const prog = (p, label) => call("onCheckProgress", p, label);
   checkBusy = true; call("onBusy", "check", true);
+  prog(0.04, `Preparing ${shots.length} screenshot${shots.length === 1 ? "" : "s"}…`);
   try {
+    prog(0.08, "Reading your screenshots with ✦ AI…");
     const o = parseJSON(await aiCall("You read brokerage and portfolio screenshots precisely, digit by digit. Reply with JSON only.",
       `These ${shots.length} screenshot${shots.length === 1 ? "" : "s"} show one investment portfolio, possibly scrolled across several screens: list each position once, even if it appears twice.
 For every position give exactly what is shown: the ticker if shown (else null), the name as shown, the ISIN if shown, the number of shares or units, the average purchase price per share, the current price per share, the current market value, and the currency of those prices.
@@ -1212,10 +1208,12 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
     const pos = (Array.isArray(o.positions) ? o.positions : []).map(p => ({ symbol: p.symbol ? String(p.symbol).trim() : "", name: String(p.name || "").trim(), isin: p.isin || "",
       shares: num2(p.shares), avgPrice: num2(p.avgPrice), price: num2(p.price), value: num2(p.value), currency: p.currency ? String(p.currency).trim() : "" })).filter(p => p.symbol || p.name);
     if (!pos.length) { toast("No positions found in those screenshots"); return; }
+    prog(0.62, `Read ${pos.length} position${pos.length === 1 ? "" : "s"}. Comparing with Stockit…`);
     for (const c of new Set(pos.map(p => p.currency).filter(Boolean))) await ensureRate(c);
     const items = [], used = new Set(), pTol = cfg("checkPriceTol"), cTol = cfg("checkCostTol");
     let n = 0;
     for (const p of pos) {
+      prog(0.62 + 0.34 * n / pos.length, `Checking ${p.symbol || p.name} (${n + 1} of ${pos.length})…`);
       const id = "c" + (n++);
       const x = matchPosition(p, stocks.filter(y => !used.has(y.s)));
       if (x) {
@@ -1244,7 +1242,8 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
     for (const x of stocks.filter(y => y.list === "own" && !used.has(y.s)))
       items.push({ id: "c" + (n++), kind: "extra", s: x.s, name: (market[x.s] || {}).name || x.name || x.s, cur: (market[x.s] || {}).cur || "", mine: { sh: x.sh || 0, cost: x.cost || 0, price: (market[x.s] || {}).price }, diffs: [] });
     const tot = totals()[0];
-    check = { at: Date.now(), shots: shots.length, broker: o.broker ? String(o.broker).slice(0, 60) : "", n: pos.length, items,
+    prog(1, "Done");
+    check = { at: Date.now(), shots: shots.length, thumbs: checkShots.map(x => x.thumb), broker: o.broker ? String(o.broker).slice(0, 60) : "", n: pos.length, items,
       total: num2(o.total), totalCur: o.totalCurrency ? String(o.totalCurrency) : "", mineTotal: tot ? { v: tot.value, cur: tot.cur } : null,
       totalInMine: tot && num2(o.total) != null ? convertCur(num2(o.total), o.totalCurrency || tot.cur, tot.cur) : null, by: settings.aiProvider };
     push();
@@ -1391,7 +1390,7 @@ function clientState() {
       for (const [k, r] of Object.entries(fxRates)) if (k.endsWith(home) && k.length === home.length + 3) rates[k.slice(0, 3)] = { rate: r.rate, prev: r.prev, at: r.at };
       return { home, choice: settings.homeCur || "auto", rates, curs: HOME_CURS }; })(),
     busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy },
-    check,
+    check, checkShots: checkShots.map(x => x.thumb),
     ai: {
       provider: settings.aiProvider,
       keys:  Object.fromEntries(Object.keys(PROVIDERS).map(p => [p, maskKey(keyFor(p))])),
@@ -1408,7 +1407,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {},
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1484,6 +1483,7 @@ async function handle(m) {
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
         settings.flashFold = Object.fromEntries(Object.entries(m.v).filter(([s, t]) => stocks.some(x => x.s === s) && isFinite(t)));
       if (m.k === "homeCur" && (m.v === "auto" || HOME_CURS.includes(m.v))) settings.homeCur = m.v;
+      if (m.k === "checkIntro" && isFinite(m.v)) settings.checkIntro = Math.max(0, Math.min(99, +m.v));
       write("settings", settings);
       if (m.k === "homeCur") { await loadFx().catch(() => {}); push(); }
       if (m.k === "widgetMoney" || m.k === "homeCur") saveWidget(widgetSnapshot());
@@ -1551,7 +1551,10 @@ async function handle(m) {
     case "ideas": return runIdeas();
     case "checkrun": return runCheck();
     case "checkapply": return applyCheck(m);
-    case "checkclear": check = null; return push();
+    case "checkclear": check = null; checkShots = []; return push();
+    case "checkpick": return addCheckShot();
+    case "checkdrop": checkShots.splice(+m.v, 1); return push();
+    case "checknew": check = null; checkShots = []; push(); return addCheckShot();
     case "preview": return openPreview(m.s);
     case "addpreview": {   // from a stock's page opened from Ideas: onto your watchlist or portfolio
       if (stocks.some(y => y.s === m.s)) return;
@@ -1660,7 +1663,8 @@ function clientApp() {
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
   let newsOpen = null; const tl = {};
-  let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null; const ckEdit = {};
+  let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null, ckProg = null, ckShown = 0, ckTimer = null; const ckEdit = {};
+  let introState = null;   // "big" on the first launches, then "shrunk" a few seconds later
   let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
@@ -2048,7 +2052,7 @@ function clientApp() {
       <h2>Start with the stocks you own or follow</h2><p>Search by name or ticker, paste a list, import your broker's CSV${S.settings.hasKey ? ", or snap a screenshot of your Stocks app watchlist" : ""}.</p>
       <button class="primary" data-act="addopen">Add stocks</button></section>`;
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
-    const head = tab === "own" ? summaryHTML(items) + (items.length ? `<button class="checkrow" data-act="checkopen"><span>✓ Check against your broker</span><small>Compare screenshots of your broker's app with Stockit</small><span class="chev" aria-hidden="true">›</span></button>` : "") + briefHTML() : "";
+    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + briefHTML() : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = (tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
@@ -2072,14 +2076,14 @@ function clientApp() {
       const ds = items.map(dayPct).filter(v => v != null);
       if (!ds.length) return "";
       const avg = ds.reduce((a, b) => a + b, 0) / ds.length;
-      return `<section class="sum"><span class="sum-k">Your stocks today, on average</span><div class="sum-v ${cls(avg)}">${pct(avg)}</div>
+      return `<section class="sum">${checkIcon()}<span class="sum-k">Your stocks today, on average</span><div class="sum-v ${cls(avg)}">${pct(avg)}</div>
         <p class="note">Add how many shares you own (open a stock › Edit shares) to see your portfolio's value.</p></section>`;
     }
     const t = T[0], dp = t.value - t.day ? t.day / (t.value - t.day) * 100 : null;
     const vals = items.map(x => [x.s, t.cur === HOME() ? posHome(x) : null]).filter(v => v[1] != null).sort((a, b) => b[1] - a[1]);
     const shown = vals.slice(0, 6), rest = vals.slice(6).reduce((a, b) => a + b[1], 0);
     if (rest > 0) shown.push(["Other", rest]);
-    return `<section class="sum"><span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${money(t.value, t.cur)}</div>
+    return `<section class="sum">${checkIcon()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${money(t.value, t.cur)}</div>
       <div class="sum-d ${cls(t.day)}">${signed(t.day, t.cur)} (${pct(dp)}) today</div>
       ${t.costKnown && t.cost ? `<div class="sum-g">${signed(t.value - t.cost, t.cur)} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
       ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => money(z.value, z.cur)).join(" and ")} until their exchange rates load</p>` : ""}
@@ -2817,56 +2821,109 @@ function clientApp() {
       <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
   }
   // ---- Check my portfolio: screenshots of your broker's app, compared with Stockit; you apply each change ----
+  const CK = {   // what each result means, with its badge
+    match: ["ok", "✓ Matches", "Shares and average price match your broker."],
+    differs: ["warn", "≠ Different", ""],
+    price: ["bad", "⚠ Price doesn't match", "The price on your screenshot is far from today's. If the screenshot is recent, Stockit may hold the wrong shares or average price for it, or a different listing of the same company."],
+    watch: ["warn", "Owned, on your watchlist", "Your screenshot shows you own it, but in Stockit it's on your watchlist."],
+    missing: ["add", "+ Not in Stockit", "On your broker's screenshot, but not in your Stockit portfolio."],
+    extra: ["gone", "− Not on your screenshots", "In your Stockit portfolio, but not on your screenshots. If they show your whole portfolio, you may have sold it."],
+  };
+  const ckStatus = it => it.kind === "differs" && it.diffs.includes("price") && it.diffs.length === 1 ? "price" : it.kind;
   function renderCheck() {
     const el = $("#checksheet"), keep = el.scrollTop;
     el.classList.toggle("open", checkOpen); lockBody();
     if (!checkOpen) return;
-    const C = S.check, bz = isBusy("check");
-    if (C && C.at !== renderCheck.at) { for (const k of Object.keys(ckEdit)) delete ckEdit[k]; renderCheck.at = C.at; }   // a new check: fresh suggestions
+    const C = S.check, bz = isBusy("check"), shots = S.checkShots || [];
+    if (C && C.at !== renderCheck.at) { for (const k of Object.keys(ckEdit)) delete ckEdit[k]; renderCheck.at = C.at; }
     const head = `<div class="sh-head"><h2>Check my portfolio</h2><button class="link" data-act="checkclose">Done</button></div>`;
     if (!S.settings.hasKey) { el.innerHTML = head + `<div class="sh-body"><p class="muted">Stockit reads your broker's screenshots with ✦ AI. Add a Claude or OpenAI key in <button class="link small" data-act="cfgopen">Settings › AI settings</button> to check your portfolio.</p></div>`; return; }
-    const intro = `<p class="muted">Take screenshots of your portfolio in your broker's or bank's app, with each position's shares and prices showing. Stockit reads them with ✦ AI and compares them with your portfolio here. <b>Nothing changes until you tap a button on a suggestion.</b></p>
-      <div class="aic-btns"><button class="primary" data-act="checkrun" ${bz ? "disabled" : ""}>${bz ? "Reading your screenshots…" : C ? "Check new screenshots" : "Choose screenshots"}</button>${C && !bz ? `<button class="sm" data-act="checkclear">Clear results</button>` : ""}</div>`;
-    if (!C) { el.innerHTML = head + `<div class="sh-body">${intro}</div>`; return; }
-    const by = k => C.items.filter(i => i.kind === k), open = i => !i.resolved;
-    const diff = by("differs").concat(by("watch")), miss = by("missing"), extra = by("extra"), ok = by("match");
-    const todo = C.items.filter(i => i.kind !== "match" && open(i)).length;
+    const thumbs = (list, edit) => `<div class="ck-shots ${edit ? "" : "mini"}">${list.map((t, i) => `<figure class="ck-shot ${bz ? "scan" : ""}"><img src="data:image/jpeg;base64,${t}" alt="Screenshot ${i + 1}">${edit && !bz ? `<button class="ck-x" data-act="checkdrop" data-v="${i}" aria-label="Remove screenshot ${i + 1}">×</button>` : ""}<figcaption>${i + 1}</figcaption></figure>`).join("")}
+      ${edit && !bz && list.length < (S.cfg.checkMaxShots || 6) ? `<button class="ck-add" data-act="checkpick"><span>+</span>${list.length ? "Add another" : "Add a screenshot"}</button>` : ""}</div>`;
+    if (!C || bz) {   // 1. choose screenshots, 2. reading them, with progress
+      const p = bz ? Math.max(ckShown, (ckProg || {}).p || 0) : 0;
+      el.innerHTML = head + `<div class="sh-body">
+        <section class="ck-step"><span class="ck-n">1</span><div><b>Your broker's screenshots</b><small>Each position's shares and prices should show. Add more if your portfolio takes several screens.</small></div></section>
+        ${thumbs(shots, true)}
+        ${bz ? `<section class="ck-progress" role="status"><div class="ck-prog-h"><span>${esc((ckProg || {}).label || "Reading…")}</span><span class="ck-prog-p">${Math.round(p * 100)}%</span></div><div class="ck-prog"><i style="width:${(p * 100).toFixed(1)}%"></i></div></section>`
+          : `<section class="ck-step"><span class="ck-n">2</span><div><b>Check them</b><small>✦ AI reads every position and Stockit compares it with your portfolio. Nothing changes until you tap a button.</small></div></section>
+        <button class="primary block" data-act="checkrun" ${shots.length ? "" : "disabled"}>${shots.length ? `Check ${shots.length} screenshot${shots.length === 1 ? "" : "s"}` : "Add a screenshot first"}</button>`}
+      </div>`;
+      el.scrollTop = keep; return;
+    }
+    // 3. the results, all open: problems first, then what matches
+    const order = { price: 0, differs: 1, watch: 2, missing: 3, extra: 4, match: 5 };
+    const items = C.items.slice().sort((a, b) => (!!a.resolved - !!b.resolved) || order[ckStatus(a)] - order[ckStatus(b)]);
+    const count = k => C.items.filter(i => ckStatus(i) === k).length, todo = C.items.filter(i => i.kind !== "match" && !i.resolved).length;
     const m2 = (v, c2) => v == null ? "—" : money(v, c2);
     const fld = (it, f, label, val, c2) => `<label class="ck-f"><span>${label}${c2 ? ` (${esc(c2)})` : ""}</span><input class="ck-in" inputmode="decimal" data-id="${it.id}" data-f="${f}" value="${esc(ckEdit[it.id] && ckEdit[it.id][f] != null ? ckEdit[it.id][f] : val != null ? +(+val).toFixed(4) : "")}"></label>`;
-    const done = it => it.resolved ? `<p class="ck-done">✓ ${esc(it.resolved)}</p>` : "";
-    const gapNote = it => it.gap != null && it.diffs.includes("price") ? `<p class="ck-warn">The price on your screenshot is ${pct(it.gap, 1)} ${it.gap > 0 ? "above" : "below"} ${it.kind === "missing" ? "Yahoo's" : "Stockit's"}. The screenshot may be older, in another currency, or for a different listing of the same company; check the shares and average price below.</p>` : "";
-    const rows = it => `<table class="ck-t"><tr><th></th><th>${it.kind === "missing" ? "Yahoo" : "Stockit"}</th><th>Screenshot</th></tr>
-      <tr class="${it.diffs.includes("shares") ? "bad" : ""}"><td>Shares</td><td>${it.mine ? nf(it.mine.sh, it.mine.sh % 1 ? 4 : 0) : "—"}</td><td>${it.shot && it.shot.shares != null ? nf(it.shot.shares, it.shot.shares % 1 ? 4 : 0) : "—"}</td></tr>
-      <tr class="${it.diffs.includes("cost") ? "bad" : ""}"><td>Average price</td><td>${it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—"}</td><td>${it.shot ? m2(it.shot.avgPrice, it.shotCur) : "—"}</td></tr>
-      <tr class="${it.diffs.includes("price") ? "bad" : ""}"><td>Price now</td><td>${m2(it.mine ? it.mine.price : it.yahooPrice, it.cur)}</td><td>${it.shot ? m2(it.shot.price, it.shotCur) : "—"}${it.gap != null ? ` <small class="${Math.abs(it.gap) > (S.cfg.checkPriceTol || 5) ? "down" : "muted"}">${pct(it.gap, 1)}</small>` : ""}</td></tr>
-      ${it.shot && it.shot.value != null ? `<tr><td>Value</td><td>${it.mine && it.mine.price != null ? m2(it.mine.sh * it.mine.price, it.cur) : "—"}</td><td>${m2(it.shot.value, it.shotCur)}</td></tr>` : ""}</table>`;
-    const card = it => {
-      const head2 = `<div class="ck-h"><b>${esc(it.s || it.shot.symbol || "?")}</b><small>${esc(it.name || "")}</small></div>`;
-      if (it.kind === "differs" || it.kind === "watch") {
-        const what = it.kind === "watch" ? "On your watchlist, but your screenshot shows you own it." : `Different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "shares", cost: "average price", price: "price" }[d])).join(", ")}.`;
-        return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">${what}</p>${rows(it)}${gapNote(it)}
-          ${it.resolved ? done(it) : `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}
-          <div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="${it.kind === "watch" ? "own" : "update"}">${it.kind === "watch" ? "Move to portfolio" : "Apply these"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep Stockit's</button></div>`}</article>`;
-      }
-      if (it.kind === "missing") return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">On your screenshot, not in Stockit.${it.s ? "" : " Stockit couldn't find it on Yahoo Finance."}</p>${rows(it)}${gapNote(it)}
-          ${it.resolved ? done(it) : it.s ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}
-          <div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="add">Add to portfolio</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`
-            : `<div class="aic-btns"><button class="sm primary" data-act="checkfind" data-v="${esc(it.shot.symbol || it.name)}">Find it</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`}</article>`;
-      return `<article class="ck ${it.resolved ? "done" : ""}">${head2}<p class="ck-what">In your Stockit portfolio (${nf(it.mine.sh, it.mine.sh % 1 ? 4 : 0)} shares), not on your screenshots. If your screenshots show your whole portfolio, you may have sold it.</p>
-        ${it.resolved ? done(it) : `<div class="aic-btns"><button class="sm danger ${ckArmed === it.id ? "armed" : ""}" data-act="checkapply" data-v="${it.id}" data-k="remove">${ckArmed === it.id ? "Confirm" : "Remove"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="watch">Move to watchlist</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep</button></div>`}</article>`;
+    const nsh = v => nf(v, v % 1 ? 4 : 0);
+    const cmp = it => {
+      const yh = it.kind === "missing";
+      const row = (label, a, b, bad) => `<div class="ck-r ${bad ? "bad" : ""}"><span>${label}</span><b>${a}</b><b>${b}</b><i>${bad ? "≠" : a !== "—" && b !== "—" ? "✓" : ""}</i></div>`;
+      if (it.kind === "extra") return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>Stockit</span><span>Broker</span><i></i></div>${row("Shares", nsh(it.mine.sh), "not shown", true)}${row("Price now", m2(it.mine.price, it.cur), "—", false)}</div>`;
+      return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>${yh ? "Yahoo" : "Stockit"}</span><span>Broker</span><i></i></div>
+        ${row("Shares", it.mine ? nsh(it.mine.sh) : "—", it.shot && it.shot.shares != null ? nsh(it.shot.shares) : "—", it.diffs.includes("shares") || yh)}
+        ${row("Average price", it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—", it.shot ? m2(it.shot.avgPrice, it.shotCur) : "—", it.diffs.includes("cost") || yh)}
+        ${row("Price now", m2(it.mine ? it.mine.price : it.yahooPrice, it.cur), (it.shot ? m2(it.shot.price, it.shotCur) : "—") + (it.gap != null ? ` <small class="${it.diffs.includes("price") ? "down" : "muted"}">${pct(it.gap, 1)}</small>` : ""), it.diffs.includes("price"))}</div>`;
     };
-    const sec = (title, list, sub) => list.length ? `<h3 class="sec">${title} <span class="n">${list.length}</span></h3>${sub ? `<p class="note">${sub}</p>` : ""}${list.map(card).join("")}` : "";
-    const tot = C.total != null ? `<p class="ck-tot">Total on your screenshot ${money(C.total, C.totalCur || (C.mineTotal || {}).cur)}${C.mineTotal ? ` · in Stockit ${money(C.mineTotal.v, C.mineTotal.cur)}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : "";
-    el.innerHTML = head + `<div class="sh-body">${intro}
-      <section class="ck-sum"><b>${todo ? `${todo} thing${todo === 1 ? "" : "s"} to review` : "Everything matches ✓"}</b>
-        <small>${C.n} position${C.n === 1 ? "" : "s"} read from ${C.shots} screenshot${C.shots === 1 ? "" : "s"}${C.broker ? " (" + esc(C.broker) + ")" : ""} by ✦ ${PN[C.by] || esc(C.by)}, ${rel(C.at)} · ${ok.length} match</small>${tot}</section>
-      ${sec("Differs", diff, "Change Stockit to what your broker shows, or keep Stockit's numbers.")}
-      ${sec("On your screenshots, not in Stockit", miss)}
-      ${sec("In Stockit, not on your screenshots", extra, "Only if your screenshots show your whole portfolio.")}
-      ${ok.length ? `<details class="ck-ok"><summary>Matching <span class="n">${ok.length}</span></summary>${ok.map(i => `<p>✓ <b>${esc(i.s)}</b> ${nf(i.mine.sh, i.mine.sh % 1 ? 4 : 0)} shares${i.mine.cost ? " at " + money(i.mine.cost, i.cur) : ""}</p>`).join("")}</details>` : ""}
-      <p class="note">✦ AI can misread a screenshot. Check each suggestion before you apply it. Not financial advice.</p></div>`;
+    const card = it => {
+      const st = ckStatus(it), [tone, label, why] = CK[st];
+      const whyTxt = st === "differs" ? `Your broker shows a different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "number of shares", cost: "average price", price: "price" }[d])).join(" and ")}.` + (it.diffs.includes("price") ? " " + CK.price[2] : "") : why;
+      const fields = it.suggest ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Average price converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}` : "";
+      const acts = it.resolved || st === "match" ? "" : st === "missing" ? (it.s
+          ? `${fields}<div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="add">Add to portfolio</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`
+          : `<div class="aic-btns"><button class="sm primary" data-act="checkfind" data-v="${esc(it.shot.symbol || it.name)}">Find it</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`)
+        : st === "extra" ? `<div class="aic-btns"><button class="sm danger ${ckArmed === it.id ? "armed" : ""}" data-act="checkapply" data-v="${it.id}" data-k="remove">${ckArmed === it.id ? "Confirm" : "Remove"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="watch">Move to watchlist</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep</button></div>`
+        : `${fields}<div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="${it.kind === "watch" ? "own" : "update"}">${it.kind === "watch" ? "Move to portfolio" : "Apply these"}</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Keep Stockit's</button></div>`;
+      return `<article class="ck t-${tone} ${it.resolved ? "done" : ""}" id="ck-${it.id}"><div class="ck-h"><div class="r-l"><b class="sym">${esc(it.s || it.shot.symbol || "?")}</b><small>${esc(it.name || "")}</small></div>
+          <span class="ck-b b-${tone}">${it.resolved ? "✓ " + esc(it.resolved) : label}</span></div>
+        ${it.resolved || st === "match" ? "" : `<p class="ck-what">${whyTxt}${it.kind === "missing" && !it.s ? " Stockit couldn't find it on Yahoo Finance." : ""}</p>`}
+        ${cmp(it)}${acts}</article>`;
+    };
+    const chip = (k, n) => n ? `<span class="ck-b b-${CK[k][0]}">${CK[k][1]} <b>${n}</b></span>` : "";
+    el.innerHTML = head + `<div class="sh-body">
+      <section class="sum ck-res"><span class="sum-k">Checked ${C.n} position${C.n === 1 ? "" : "s"}${C.broker ? " from " + esc(C.broker) : ""}</span>
+        <div class="sum-v ${todo ? "" : "up"}">${todo ? `${todo} to review` : "All in step ✓"}</div>
+        <div class="ck-chips">${["match", "differs", "price", "watch", "missing", "extra"].map(k => chip(k, count(k))).join("")}</div>
+        ${C.total != null ? `<p class="ck-tot">Broker's total ${money(C.total, C.totalCur || (C.mineTotal || {}).cur)}${C.mineTotal ? ` · Stockit ${money(C.mineTotal.v, C.mineTotal.cur)}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : ""}
+        <p class="note">Read by ✦ ${PN[C.by] || esc(C.by)} ${rel(C.at)} from ${C.shots} screenshot${C.shots === 1 ? "" : "s"}. AI can misread a screenshot, so check a suggestion before you apply it.</p></section>
+      ${(C.thumbs || []).length ? thumbs(C.thumbs, false) : ""}
+      <div class="ck-list">${items.map(card).join("")}</div>
+      <div class="aic-btns ck-again"><button class="sm primary" data-act="checknew">New check</button><button class="sm" data-act="checkclear">Clear results</button></div>
+      <p class="note">Not financial advice.</p></div>`;
     el.scrollTop = keep;
   }
+  // ---- the check button: big on the first three launches, then it shrinks into the ✓ icon on the portfolio ----
+  const CHECK_ICO = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-3 8.3-7 9.5C8 19.3 5 15.4 5 11V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8.8 12.2l2.3 2.3 4.3-4.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  function checkIcon() { return `<button class="ck-icon ${introState === "shrunk" ? "ping" : ""}" data-act="checkopen" aria-label="Check against your broker" title="Check against your broker">${CHECK_ICO}</button>`; }
+  function checkIntroHTML(items) {
+    if (!items.length || !introState || introState === "gone") return "";
+    return `<button class="ck-big ${introState === "shrunk" ? "shrink" : ""}" data-act="checkopen"><span class="ck-big-i">${CHECK_ICO}</span><span class="ck-big-t"><b>Check against your broker</b><small>Upload screenshots of your broker's app and see what's different</small></span><span class="chev" aria-hidden="true">›</span></button>`;
+  }
+  (function startIntro() {
+    const own = S.stocks.filter(x => x.list === "own").length, n = +S.settings.checkIntro || 0;
+    if (!own || n >= 3) return;
+    introState = "big"; send("set", { k: "checkIntro", v: n + 1 });
+    setTimeout(() => {
+      introState = "shrunk";
+      const big = document.querySelector(".ck-big"), ico = document.querySelector(".ck-icon");
+      if (big) big.classList.add("shrink"); if (ico) ico.classList.add("ping");
+      setTimeout(() => { introState = "gone"; if (big) big.remove(); }, 1600);
+    }, 6000);
+  })();
+  window.onCheckProgress = (p, label) => {
+    ckProg = p >= 1 ? null : { p, label };
+    if (ckProg && ckShown < p) ckShown = p;
+    clearInterval(ckTimer);
+    if (ckProg && p < 0.6) ckTimer = setInterval(() => {   // the AI reading takes a while: creep towards 60% meanwhile
+      if (!ckProg) return clearInterval(ckTimer);
+      ckShown += (0.58 - ckShown) * 0.035;
+      const bar = document.querySelector(".ck-prog i"), pc = document.querySelector(".ck-prog-p");
+      if (bar) bar.style.width = (ckShown * 100).toFixed(1) + "%"; if (pc) pc.textContent = Math.round(ckShown * 100) + "%";
+    }, 300);
+    renderCheck();
+  };
   function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen)); }
 
   // ---- interactions ----
@@ -2921,7 +2978,10 @@ function clientApp() {
       case "mktopen": tab = v; render(); break;
       case "checkopen": checkOpen = true; renderCheck(); $("#checksheet").scrollTop = 0; break;
       case "checkclose": checkOpen = false; renderCheck(); break;
-      case "checkrun": send("checkrun", {}); break;
+      case "checkrun": ckProg = { p: 0.02, label: "Starting…" }; ckShown = 0.02; send("checkrun", {}); renderCheck(); break;
+      case "checkpick": send("checkpick", {}); break;
+      case "checkdrop": send("checkdrop", { v }); break;
+      case "checknew": for (const k of Object.keys(ckEdit)) delete ckEdit[k]; send("checknew", {}); break;
       case "checkclear": send("checkclear", {}); break;
       case "checkapply": {
         const it = S.check && S.check.items.find(i => i.id === v), k = t.dataset.k;
@@ -3406,28 +3466,59 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .xtip .up{color:#86efac} .xtip .down{color:#fca5a5}
 .rng button{padding-left:4px;padding-right:4px}
 /* Check my portfolio */
+.sum{position:relative}
+.ck-icon{position:absolute;top:10px;right:2px;width:38px;height:38px;border-radius:19px;display:grid;place-items:center;background:var(--signal-wash);color:var(--signal)}
+.ck-icon svg{width:21px;height:21px}
+.ck-icon.ping{animation:ckping 1.4s ease-out 1}
+@keyframes ckping{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent);transform:scale(1.25)}100%{box-shadow:0 0 0 16px transparent;transform:scale(1)}}
+.ck-big{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--signal);color:var(--paper);border-radius:14px;padding:14px 16px;margin:12px 0 2px;max-height:120px;overflow:hidden;transform-origin:top right;transition:max-height .6s ease,opacity .5s ease,transform .6s ease,margin .6s ease,padding .6s ease}
+.ck-big.shrink{max-height:0;opacity:0;transform:scale(.2) translate(40%,-20%);margin:0;padding-top:0;padding-bottom:0}
+.ck-big-i{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;background:rgba(255,255,255,.18);flex:none} .ck-big-i svg{width:24px;height:24px}
+.ck-big-t{flex:1} .ck-big-t b{display:block;font:700 calc(17px * var(--ts))/1.25 var(--display)} .ck-big-t small{display:block;opacity:.85;font-size:calc(13px * var(--ts));margin-top:2px}
+.ck-big .chev{font-size:24px;opacity:.85}
 #checksheet{z-index:12}
-.checkrow{display:flex;flex-wrap:wrap;align-items:center;width:100%;text-align:left;gap:2px 8px;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:11px 14px;margin:0 0 12px}
-.checkrow span:first-child{font-weight:700;color:var(--signal);flex:1}
-.checkrow small{order:3;flex-basis:100%;color:var(--muted);font-size:calc(12.5px * var(--ts))}
-.checkrow .chev{font-size:20px;color:var(--muted)}
-.ck-sum{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:14px 0 4px}
-.ck-sum b{display:block;font:700 calc(18px * var(--ts))/1.3 var(--display)} .ck-sum small{display:block;color:var(--muted);font-size:calc(12.5px * var(--ts));margin-top:2px}
-.ck-tot{margin:8px 0 0;font-size:calc(14px * var(--ts))}
-.ck{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:8px 0}
-.ck.done{opacity:.7}
-.ck-h b{font:700 calc(17px * var(--ts))/1.2 var(--display);margin-right:6px} .ck-h small{color:var(--muted);font-size:calc(13px * var(--ts))}
-.ck-what{margin:4px 0 8px;font-size:calc(14.5px * var(--ts))}
-.ck-t{width:100%;border-collapse:collapse;font-size:calc(14px * var(--ts));margin:4px 0 8px}
-.ck-t th{text-align:left;font-size:calc(12px * var(--ts));color:var(--muted);font-weight:600;padding:2px 4px}
-.ck-t td{padding:5px 4px;border-top:1px solid var(--rule)} .ck-t td:first-child{color:var(--muted)}
-.ck-t tr.bad td{background:color-mix(in srgb, var(--amber) 14%, transparent);font-weight:700} .ck-t tr.bad td:first-child{color:var(--ink)}
-.ck-warn{background:color-mix(in srgb, var(--danger) 10%, transparent);border-left:3px solid var(--danger);border-radius:0 8px 8px 0;padding:8px 10px;font-size:calc(13.5px * var(--ts));margin:6px 0 10px}
-.ck-fs{display:flex;gap:10px;margin:6px 0}
+.ck-step{display:flex;gap:12px;align-items:flex-start;margin:14px 0 8px}
+.ck-step b{display:block;font:700 calc(16px * var(--ts))/1.3 var(--display)} .ck-step small{display:block;color:var(--muted);font-size:calc(13px * var(--ts));margin-top:2px}
+.ck-n{width:26px;height:26px;flex:none;border-radius:13px;display:grid;place-items:center;background:var(--signal);color:var(--paper);font-weight:700;font-size:14px}
+.ck-shots{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 12px}
+.ck-shots.mini{grid-template-columns:repeat(6,1fr);gap:6px;margin:0 0 12px} .ck-shots.mini figcaption{display:none}
+.ck-shot{position:relative;margin:0;aspect-ratio:9/16;border-radius:10px;overflow:hidden;border:1px solid var(--rule);background:var(--sheet)}
+.ck-shot img{width:100%;height:100%;object-fit:cover;display:block}
+.ck-shot figcaption{position:absolute;left:6px;bottom:6px;min-width:20px;height:20px;border-radius:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;padding:0 6px}
+.ck-x{position:absolute;top:5px;right:5px;width:26px;height:26px;border-radius:13px;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:1}
+.ck-shot.scan::after{content:"";position:absolute;left:0;right:0;height:30%;top:-30%;background:linear-gradient(180deg,transparent,color-mix(in srgb, var(--signal) 45%, transparent),transparent);animation:ckscan 1.6s linear infinite}
+@keyframes ckscan{to{top:100%}}
+.ck-add{aspect-ratio:9/16;border-radius:10px;border:2px dashed var(--rule);color:var(--signal);font-weight:700;font-size:calc(13px * var(--ts));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+.ck-add span{font-size:28px;line-height:1}
+.primary.block[disabled]{opacity:.5}
+.ck-progress{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:6px 0}
+.ck-prog-h{display:flex;justify-content:space-between;gap:10px;font-size:calc(14px * var(--ts));font-weight:600;margin-bottom:8px}
+.ck-prog-p{color:var(--signal);font-variant-numeric:tabular-nums}
+.ck-prog{height:8px;border-radius:4px;background:var(--rule);overflow:hidden} .ck-prog i{display:block;height:100%;background:var(--signal);border-radius:4px;transition:width .3s ease}
+.ck-res{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:14px 0 10px}
+.ck-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.ck-b{display:inline-flex;align-items:center;gap:4px;font-size:calc(12px * var(--ts));font-weight:700;padding:3px 9px;border-radius:7px;white-space:nowrap}
+.ck-b b{font-weight:800}
+.b-ok{color:var(--up);background:color-mix(in srgb, var(--up) 13%, transparent)} .b-warn{color:var(--amber);background:color-mix(in srgb, var(--amber) 15%, transparent)}
+.b-bad{color:var(--danger);background:color-mix(in srgb, var(--danger) 12%, transparent)} .b-add{color:var(--signal);background:var(--signal-wash)} .b-gone{color:var(--ink-2);background:color-mix(in srgb, var(--muted) 18%, transparent)}
+.ck-tot{margin:8px 0 2px;font-size:calc(14px * var(--ts))}
+.ck-list{display:flex;flex-direction:column;gap:8px}
+.ck{background:var(--sheet);border:1px solid var(--rule);border-left:4px solid var(--rule);border-radius:12px;padding:12px 14px}
+.ck.t-ok{border-left-color:var(--up)} .ck.t-warn{border-left-color:var(--amber)} .ck.t-bad{border-left-color:var(--danger)} .ck.t-add{border-left-color:var(--signal)} .ck.t-gone{border-left-color:var(--muted)}
+.ck.done{opacity:.72}
+.ck-h{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.ck-what{margin:6px 0 8px;font-size:calc(14px * var(--ts));color:var(--ink-2);line-height:1.45}
+.ck-cmp{margin:8px 0 6px;font-size:calc(14px * var(--ts))}
+.ck-r{display:grid;grid-template-columns:1.15fr 1fr 1fr 18px;gap:6px;align-items:baseline;padding:5px 4px;border-top:1px solid var(--rule)}
+.ck-r.hd{border-top:0;padding-top:0;font-size:calc(11.5px * var(--ts));color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.ck-r span{color:var(--muted)} .ck-r b{font-weight:600} .ck-r i{font-style:normal;color:var(--up);font-weight:800;text-align:right}
+.ck-r.bad b{color:var(--ink);font-weight:800} .ck-r.bad i{color:var(--danger)}
+.ck-r.bad{background:linear-gradient(90deg,color-mix(in srgb, var(--amber) 14%, transparent),transparent);border-radius:6px}
+.ck-fs{display:flex;gap:10px;margin:8px 0 6px}
 .ck-f{flex:1;display:flex;flex-direction:column;gap:3px;font-size:calc(12.5px * var(--ts));color:var(--muted);font-weight:600}
 .ck-f input{font:16px var(--sans);padding:8px 10px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);width:100%;-webkit-user-select:text;user-select:text}
-.ck-done{color:var(--up);font-weight:700;margin:6px 0 0}
-.ck-ok{margin:14px 0} .ck-ok summary{font-weight:700;color:var(--signal)} .ck-ok p{margin:6px 0;font-size:calc(14px * var(--ts))}
+.ck-again{margin:14px 0 4px}
+#checksheet{z-index:12}
 /* Ideas: sections that fold, themes, rich idea cards */
 .fold-sec{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;margin:10px 0 14px;overflow:hidden}
 .fold-sec.strat-sec{border-left:4px solid var(--amber)} .fold-sec.ideas-sec{border-left:4px solid var(--signal)}

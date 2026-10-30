@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.8.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.9.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -132,22 +132,29 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 
 ## Check against your broker
 
-<img src="docs/screenshots/26-check-differs.png" width="250" align="right" alt="Check my portfolio: AAPL with different shares and average price, MSFT with a price far from Stockit's, each with fields to edit and Apply">
+<img src="docs/screenshots/26-check-results.png" width="250" align="right" alt="Check results: 6 to review, with badges for matches, differences, price mismatches, missing and extra stocks">
 
-Is Stockit still in step with your real portfolio? In **Portfolio**, tap **Check against your broker** and choose screenshots of your broker's or bank's app (several, if your portfolio takes more than one screen). ✦ AI reads every position exactly as shown, and Stockit compares it with yours:
+Is Stockit still in step with your real portfolio? Tap the **✓ shield icon** on your portfolio summary. (On your first three launches, a big **Check against your broker** button shows the way, then shrinks into that icon after a few seconds.)
 
-- **Differs:** shares, average price or the current price don't match. You see Stockit's numbers beside the screenshot's, can edit the suggested shares and average price, then **Apply these** or **Keep Stockit's**. A price that's far off is flagged, with the likely reasons: an older screenshot, another currency or a different listing.
-- **On your screenshots, not in Stockit:** **Add to portfolio** with the shares and average price shown (converted to the stock's currency), or **Find it** if Yahoo doesn't know the name.
-- **In Stockit, not on your screenshots:** **Remove**, **Move to watchlist** or **Keep**, in case you sold it.
-- A stock on your watchlist that you actually own: **Move to portfolio**.
+1. **Add your broker's screenshots.** Each appears straight away as a numbered thumbnail; tap **×** to drop one or **+ Add another** if your portfolio takes several screens.
+2. **Check them.** A progress bar shows each step while ✦ AI reads every position and Stockit compares it with yours.
+3. **Review the results, all on one screen.** A summary counts each kind of result and compares the totals; then every stock has its own card, problems first, with a Stockit-versus-broker comparison marked ✓ or ≠ line by line:
+   - **✓ Matches**: shares and average price agree.
+   - **≠ Different**: different shares or average price. Edit the suggested numbers, then **Apply these** or **Keep Stockit's**.
+   - **⚠ Price doesn't match**: the broker's price is far from today's. If the screenshot is recent, Stockit may hold the wrong shares or average price, or a different listing of the same company; correct them right there.
+   - **+ Not in Stockit**: **Add to portfolio** with the shares and average price shown, or **Find it** if Yahoo doesn't know the name.
+   - **− Not on your screenshots**: **Remove**, **Move to watchlist** or **Keep**, in case you sold it.
+   - **Owned, on your watchlist**: **Move to portfolio**.
 
-**Nothing changes on its own.** Each suggestion waits for your tap. Tolerances (1% for average prices and 5% for prices by default) and the number of screenshots are in **Settings › Portfolio check**.
+**Nothing changes on its own.** Each suggestion waits for your tap and is marked once handled. Tolerances (1% for average prices and 5% for prices by default) and the number of screenshots are in **Settings › Portfolio check**.
 
 <p align="center">
-  <img src="docs/screenshots/25-check.png" width="250" alt="The check's summary: 6 things to review, positions read from the screenshot, and the totals compared">&nbsp;
-  <img src="docs/screenshots/27-check-missing.png" width="250" alt="A stock on the screenshot but not in Stockit, ready to add, and one Yahoo doesn't know">
+  <img src="docs/screenshots/28-check-intro.png" width="200" alt="The big Check against your broker button on a first launch, above the portfolio">&nbsp;
+  <img src="docs/screenshots/25-check.png" width="200" alt="Two broker screenshots added as thumbnails, ready to check">&nbsp;
+  <img src="docs/screenshots/29-check-progress.png" width="200" alt="The progress bar while the screenshots are read">&nbsp;
+  <img src="docs/screenshots/27-check-differs.png" width="200" alt="Cards for a price that doesn't match and different shares, with fields to correct">
 </p>
-<p align="center"><sub><b>The summary</b>, with both totals · <b>Missing stocks</b>, ready to add</sub></p>
+<p align="center"><sub><b>First launches</b>: the big button · <b>Your screenshots</b>, shown at once · <b>Reading</b>, with progress · <b>Every stock marked</b>, ready to correct</sub></p>
 
 <br clear="right">
 
@@ -312,7 +319,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
-| Check Stockit against your broker | **Portfolio › Check against your broker**, choose screenshots, then apply or ignore each suggestion |
+| Check Stockit against your broker | Tap the **✓ shield** on your portfolio, add screenshots, tap **Check**, then apply or ignore each suggestion |
 | Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |
 | Change the themes for ideas | **Ideas › Themes you like** |
 | Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
