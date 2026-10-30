@@ -4,6 +4,34 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.14.0",
+      "date": "2026-10-30",
+      "title": "A tidier portfolio",
+      "highlights": [
+        {
+          "icon": "🗞",
+          "title": "Briefing folds away",
+          "text": "Once you've moved on to another tab, the briefing shrinks to its headline; tap to open it."
+        },
+        {
+          "icon": "💼",
+          "title": "Invested and gained",
+          "text": "Each stock shows what you put in and what you've gained or lost, in your currency."
+        },
+        {
+          "icon": "👁",
+          "title": "Private too",
+          "text": "Both amounts hide with the eye, like the rest of your money."
+        }
+      ],
+      "changes": [
+        "The ✦ AI briefing on the portfolio folds and unfolds by tapping its header (or its headline when folded); folded, it shows the headline and the buy, hold and sell counts",
+        "After you leave the Portfolio tab, the briefing comes back folded and stays folded, even after reopening Stockit, until a new briefing arrives",
+        "Each owned stock in the portfolio shows Invested (shares × average price) and the gain or loss with its percentage, in your currency; foreign stocks convert at today's rate",
+        "Both hide in privacy mode"
+      ]
+    },
+    {
       "version": "1.13.3",
       "date": "2026-10-30",
       "title": "Safer with your data",

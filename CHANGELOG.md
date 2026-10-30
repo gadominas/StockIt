@@ -2,6 +2,19 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.14.0 (2026-10-30): A tidier portfolio
+
+- 🗞 **Briefing folds away**: Once you've moved on to another tab, the briefing shrinks to its headline; tap to open it.
+- 💼 **Invested and gained**: Each stock shows what you put in and what you've gained or lost, in your currency.
+- 👁 **Private too**: Both amounts hide with the eye, like the rest of your money.
+
+**Changes**
+
+- The ✦ AI briefing on the portfolio folds and unfolds by tapping its header (or its headline when folded); folded, it shows the headline and the buy, hold and sell counts
+- After you leave the Portfolio tab, the briefing comes back folded and stays folded, even after reopening Stockit, until a new briefing arrives
+- Each owned stock in the portfolio shows Invested (shares × average price) and the gain or loss with its percentage, in your currency; foreign stocks convert at today's rate
+- Both hide in privacy mode
+
 ## 1.13.3 (2026-10-30): Safer with your data
 
 - 🛟 **A damaged file can't stop you**: If a saved file can't be read, Stockit keeps a copy, starts it fresh and saves your changes again.
