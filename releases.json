@@ -4,6 +4,34 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.16.0",
+      "date": "2026-10-31",
+      "title": "Anonymous usage, if you agree",
+      "highlights": [
+        {
+          "icon": "📊",
+          "title": "Help shape Stockit",
+          "text": "If you agree, Stockit sends anonymous counts of the features you use. Nothing else."
+        },
+        {
+          "icon": "🔒",
+          "title": "Anonymous by design",
+          "text": "A random ID made on your phone, never your content, names or accounts."
+        },
+        {
+          "icon": "🎛️",
+          "title": "Your choice, any time",
+          "text": "Settings › Privacy turns it on or off, and Send test shows what happened."
+        }
+      ],
+      "changes": [
+        "Anonymous usage analytics (app-blueprints · usage-analytics 1.1.0): opt-in, anonymous counts to PostHog's US cloud, with a one-time question and Settings › Privacy (switch and Send test)",
+        "Events: app_open (layout, theme, ai_key, privacy), stock_added (count), briefing_made, story_made, ideas_made (provider), portfolio_checked (source), strategy_saved (from), listened (kind, voice), app_updated",
+        "Never sent: tickers, company names, prices, amounts, positions, strategies or screenshots"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.15.0",
       "date": "2026-10-31",
       "title": "Clearer Settings",
