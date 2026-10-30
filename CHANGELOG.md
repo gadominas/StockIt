@@ -2,6 +2,19 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.13.0 (2026-10-30): An invitation to AI
+
+- ✦ **See what AI adds**: Now and then, without a key, Stockit shows what AI adds: the briefing, ideas and stories.
+- 🔑 **Three steps to turn it on**: Turn on AI opens AI settings with Add key highlighted; the rest takes a minute.
+- 🤫 **Never in the way**: Later waits a few days, Don't remind me ends it, and it never shows during a demo or Listen.
+
+**Changes**
+
+- AI invitation (app-blueprints · ai-invitation 1.0.1): an animated card on launch, only without an AI key, at most every 3 days (weekly after the fourth Later), never on the first day or with an update offer
+- Turn on AI opens AI settings with the Add key button pulsing; Later, a tap outside, or Don't remind me again
+- Never while privacy is on (the eye) or while Listen is reading aloud
+- Adding a key ends the invitations for good
+
 ## 1.12.0 (2026-10-30): Checks that read your totals
 
 - 🧮 **Shares from the totals**: When your bank shows only a price and a position's value, Stockit works out the shares.
