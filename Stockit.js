@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Privacy mode: one tap on the eye hides your amounts (value, gains, shares, average prices) for demos
  *  - ✦ Suggested strategies from your portfolio, watchlist and plans, refreshed on a schedule you choose; keep any as your own, and edit every strategy
  *  - Check my portfolio: screenshots of your broker's app compared with Stockit, every difference a suggestion you apply or ignore
  *  - All your money in one currency of your choice (euros, dollars, …), in the app and the widget
@@ -28,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.10.0';
+const VERSION = '1.11.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -226,7 +227,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true,   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true, privacy: false,   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1454,7 +1455,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1524,7 +1525,7 @@ async function handle(m) {
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
-      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat",
+      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -1533,7 +1534,7 @@ async function handle(m) {
       if (m.k === "checkIntro" && isFinite(m.v)) settings.checkIntro = Math.max(0, Math.min(99, +m.v));
       write("settings", settings);
       if (m.k === "homeCur") { await loadFx().catch(() => {}); push(); }
-      if (m.k === "widgetMoney" || m.k === "homeCur") saveWidget(widgetSnapshot());
+      if (m.k === "widgetMoney" || m.k === "homeCur" || m.k === "privacy") saveWidget(widgetSnapshot());
       return;
     case "cfg": {
       if (m.k === "*") settings.cfg = {}; else setCfg(m.k, m.v);
@@ -1864,6 +1865,21 @@ function clientApp() {
     if (h == null) return f(v, cur, compact);
     return f(h, HOME(), compact) + (foreign(cur) ? `<small class="orig">${f(v, cur, compact)}</small>` : "");
   };
+  // Privacy mode (the eye in the header): your own amounts become •••• so the app can be shown to someone.
+  // Market prices and percentages stay; amounts written by AI or in your strategies are masked too.
+  const priv = () => !!S.settings.privacy;
+  const P = h => priv() ? `<span class="pv" title="Hidden">••••</span>` : h;
+  const MONEY_RX = /(?:US\$|[$€£¥]|\b(?:USD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|JPY|CAD|AUD|HKD)\s?)\s?\d[\d,.\u00a0 ]*\d(?:\s?(?:[kKmMbB]n?|million|billion|thousand)\b)?|\b\d[\d,.\u00a0]*\d?\s?(?:USD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|JPY|CAD|AUD|HKD|euros?|dollars?|pounds?)\b|\b\d[\d,.]*\s?(?:shares|units)\b/gi;
+  const mask = t => priv() ? String(t == null ? "" : t).replace(MONEY_RX, "••••") : t;
+  const PRIV_ON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10.9 10.9 0 0 1 12 5c5.5 0 9.3 4.6 10 7-.3 1-1.1 2.4-2.4 3.8M6.6 6.6C4.4 8 2.9 10 2 12c.9 2.5 4.6 7 10 7 1.8 0 3.4-.5 4.8-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const PRIV_OFF = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c.9-2.5 4.6-7 10-7s9.1 4.5 10 7c-.9 2.5-4.6 7-10 7S2.9 14.5 2 12z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+  function renderPriv() {
+    const b = $("#privbtn"); if (!b) return;
+    b.innerHTML = priv() ? PRIV_ON : PRIV_OFF; b.classList.toggle("on", priv());
+    b.setAttribute("aria-pressed", priv() ? "true" : "false");
+    b.setAttribute("aria-label", priv() ? "Show your amounts" : "Hide your amounts");
+    document.body.classList.toggle("privacy", priv());
+  }
   const signed = (v, cur) => v == null || !isFinite(v) ? "—" : (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, false, 2);
   const pct = (v, d = 2) => v == null || !isFinite(v) ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + "%";
   const bigN = v => v == null || !isFinite(v) ? "—" : v >= 1e12 ? nf(v / 1e12, 2) + "T" : v >= 1e9 ? nf(v / 1e9, 1) + "B" : v >= 1e6 ? nf(v / 1e6, 0) + "M" : nf(v, 0);
@@ -2077,7 +2093,7 @@ function clientApp() {
   setInterval(tickMarkets, 30000);
 
   function paras(t, links) {
-    return String(t || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    return String(mask(t) || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).map(p => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\s*\[(\d+(?:\s*,\s*\d+)*)\]/g, (m, g) => links ? `<span class="refw">${g.split(/\s*,\s*/).map(n => links[+n - 1] ? `<button class="ref" data-act="openlink" data-v="${esc(links[+n - 1].l)}" aria-label="Open headline ${+n}">${+n}</button>` : "").join("")}</span>` : "")}</p>`);
   }
   const sigChip = sig => sig ? `<span class="chip sig-${sig.signal}">✦ ${cap(sig.signal)}</span>` : "";
@@ -2095,9 +2111,9 @@ function clientApp() {
     const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null], ["markets", "Markets", null], ["ideas", S.settings.hasKey ? "✦ Ideas" : "Ideas", null]];
     $("#tabs").innerHTML = t.map(([k, l, n]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
-  function renderAll() { render(); renderDetail(); renderNews(); renderCheck(); renderAdd(); renderAI(); renderCfg(); }
+  function renderAll() { renderPriv(); render(); renderDetail(); renderNews(); renderCheck(); renderAdd(); renderAI(); renderCfg(); }
   function render() {
-    applyLook(); renderStatus(); renderTabs();
+    applyLook(); renderPriv(); renderStatus(); renderTabs();
     $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : tab === "markets" ? marketsHTML() : listHTML();
   }
 
@@ -2126,7 +2142,7 @@ function clientApp() {
   }
   function row(x) {
     const d = dayPct(x), c = cls(d);
-    const ph = posHome(x), sub = x.list === "own" && x.sh && x.price != null ? `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${ph != null ? money(ph, HOME(), true) : money(x.sh * x.price, x.cur, true)}` : esc(x.name);
+    const ph = posHome(x), sub = x.list === "own" && x.sh && x.price != null ? (priv() ? `${P("")} shares · ${P("")}` : `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${ph != null ? money(ph, HOME(), true) : money(x.sh * x.price, x.cur, true)}`) : esc(x.name);
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
     return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
@@ -2148,10 +2164,10 @@ function clientApp() {
     const vals = items.map(x => [x.s, t.cur === HOME() ? posHome(x) : null]).filter(v => v[1] != null).sort((a, b) => b[1] - a[1]);
     const shown = vals.slice(0, 6), rest = vals.slice(6).reduce((a, b) => a + b[1], 0);
     if (rest > 0) shown.push(["Other", rest]);
-    return `<section class="sum">${checkIcon()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${money(t.value, t.cur)}</div>
-      <div class="sum-d ${cls(t.day)}">${signed(t.day, t.cur)} (${pct(dp)}) today</div>
-      ${t.costKnown && t.cost ? `<div class="sum-g">${signed(t.value - t.cost, t.cur)} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
-      ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => money(z.value, z.cur)).join(" and ")} until their exchange rates load</p>` : ""}
+    return `<section class="sum">${checkIcon()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${P(money(t.value, t.cur))}</div>
+      <div class="sum-d ${cls(t.day)}">${P(signed(t.day, t.cur))} (${pct(dp)}) today</div>
+      ${t.costKnown && t.cost ? `<div class="sum-g">${P(signed(t.value - t.cost, t.cur))} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
+      ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => P(money(z.value, z.cur))).join(" and ")} until their exchange rates load</p>` : ""}
       ${t.mixed ? `<p class="note">Stocks in other currencies at today's exchange rates. Change the currency in <button class="link small" data-act="cfgopen">Settings › Portfolio</button>.</p>` : ""}
       ${shown.length > 1 ? `<div class="alloc" aria-hidden="true">${shown.map((v, i) => `<i style="flex:${v[1].toFixed(2)};background:color-mix(in srgb, var(--signal) ${Math.max(18, 100 - i * 13)}%, var(--sheet))"></i>`).join("")}</div>
         <div class="alloc-l">${shown.map((v, i) => `<span><i style="background:color-mix(in srgb, var(--signal) ${Math.max(18, 100 - i * 13)}%, var(--sheet))"></i>${esc(v[0])} ${(v[1] / t.value * 100).toFixed(0)}%</span>`).join("")}</div>` : ""}
@@ -2176,7 +2192,7 @@ function clientApp() {
     S.stocks.forEach(x => { if (x.sig && n[x.sig.signal] != null) n[x.sig.signal]++; });
     return `<section class="brief mood-${esc(b.mood)}">
       <div class="brief-h"><span class="badge-ai">✦ AI briefing by ${PN[b.by] || esc(b.by)}</span><span class="note">${rel(b.at)}</span></div>
-      <h2 class="brief-t">${esc(b.headline)}</h2>
+      <h2 class="brief-t">${esc(mask(b.headline))}</h2>
       <div class="brief-s">${(briefFull ? ps : ps.slice(0, 1)).join("")}</div>
       ${ps.length > 1 ? `<button class="link small" data-act="brieffull">${briefFull ? "Show less" : "Read the full briefing"}</button>` : ""}
       ${briefFull && (b.watch || []).length ? `<h3 class="mini">Keep an eye on</h3><ul class="dots">${b.watch.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
@@ -2196,8 +2212,8 @@ function clientApp() {
     const card = g => {
       const ed = sgEdit[g.id];
       return `<article class="strat-c sg">${ed ? `<textarea class="sg-in" data-id="${esc(g.id)}" data-f="text" rows="3">${esc(ed.text)}</textarea><input class="sg-in cfgin wide" data-id="${esc(g.id)}" data-f="when" value="${esc(ed.when)}" placeholder="Timing (optional)">`
-        : `<p class="strat-t">${esc(g.text)}</p>${g.when ? `<small class="muted">Timing: ${esc(g.when)}</small>` : ""}`}
-        ${g.why ? `<p class="strat-ai">${esc(g.why)}</p>` : ""}${(g.tickers || []).length ? `<div class="sg-tk">${g.tickers.map(t => `<button class="chip" data-act="${S.stocks.some(x => x.s === t) ? "open" : "preview"}" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
+        : `<p class="strat-t">${esc(mask(g.text))}</p>${g.when ? `<small class="muted">Timing: ${esc(mask(g.when))}</small>` : ""}`}
+        ${g.why ? `<p class="strat-ai">${esc(mask(g.why))}</p>` : ""}${(g.tickers || []).length ? `<div class="sg-tk">${g.tickers.map(t => `<button class="chip" data-act="${S.stocks.some(x => x.s === t) ? "open" : "preview"}" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>` : ""}
         <div class="aic-btns"><button class="sm primary" data-act="sgkeep" data-v="${esc(g.id)}">${ed ? "Keep my version" : "Keep"}</button>${ed ? `<button class="sm" data-act="sgcancel" data-v="${esc(g.id)}">Cancel</button>` : `<button class="sm" data-act="sgedit" data-v="${esc(g.id)}">Edit, then keep</button>`}<button class="sm" data-act="sgdismiss" data-v="${esc(g.id)}">Dismiss</button></div></article>`;
     };
     return `<div class="sg-box"><div class="sg-h"><span class="badge-ai">✦ Suggested for you</span>${G ? `<small class="muted">${rel(G.at)}${G.by ? " · " + (PN[G.by] || esc(G.by)) : ""}</small>` : ""}</div>
@@ -2214,9 +2230,9 @@ function clientApp() {
       if (ed) return `<article class="strat-c editing"><label class="lk-l">Your strategy</label><textarea id="stratEditText" rows="3">${esc(stratEdit.text)}</textarea>
         <input id="stratEditWhen" class="cfgin wide" placeholder="Timing (optional)" value="${esc(stratEdit.when)}">
         <div class="aic-btns"><button class="sm primary" data-act="stratsave" data-v="${esc(g.id)}">Save</button><button class="sm" data-act="stratcancel">Cancel</button></div></article>`;
-      return `<article class="strat-c ${g.status === "retired" ? "retired" : ""}"><p class="strat-t">${esc(g.text)}</p>
-      <small class="muted">${g.when ? `Timing: ${esc(g.when)} · ` : ""}${g.from === "suggested" ? "From a ✦ suggestion · " : ""}Set ${rel(g.at)}${g.editedAt ? ` · changed ${rel(g.editedAt)}` : ""}${g.status === "retired" && g.retiredAt ? ` · retired ${rel(g.retiredAt)}` : ""}</small>
-      ${n ? `<p class="strat-ai"><span class="badge-ai">✦ Where it stands</span> ${esc(n[0])} <small class="muted">${rel(n[1])}</small></p>` : ""}
+      return `<article class="strat-c ${g.status === "retired" ? "retired" : ""}"><p class="strat-t">${esc(mask(g.text))}</p>
+      <small class="muted">${g.when ? `Timing: ${esc(mask(g.when))} · ` : ""}${g.from === "suggested" ? "From a ✦ suggestion · " : ""}Set ${rel(g.at)}${g.editedAt ? ` · changed ${rel(g.editedAt)}` : ""}${g.status === "retired" && g.retiredAt ? ` · retired ${rel(g.retiredAt)}` : ""}</small>
+      ${n ? `<p class="strat-ai"><span class="badge-ai">✦ Where it stands</span> ${esc(mask(n[0]))} <small class="muted">${rel(n[1])}</small></p>` : ""}
       <div class="aic-btns">${g.status === "retired"
         ? `<button class="sm" data-act="stratrestore" data-v="${esc(g.id)}">Bring back</button><button class="sm danger ${stratArmed === g.id ? "armed" : ""}" data-act="stratdelete" data-v="${esc(g.id)}">${stratArmed === g.id ? "Confirm" : "Delete"}</button>`
         : `<button class="sm" data-act="stratedit" data-v="${esc(g.id)}">Edit</button><button class="sm" data-act="stratretire" data-v="${esc(g.id)}">Retire</button>`}</div></article>`;
@@ -2333,11 +2349,11 @@ function clientApp() {
     if (!x.sh) return `<section class="hold"><p class="muted">How many shares do you own? Add them to see your value and gain.</p><button class="sm primary" data-act="holding" data-v="${esc(x.s)}">Add shares</button></section>`;
     const v = x.price != null ? x.sh * x.price : null, g = x.cost && v != null ? v - x.sh * x.cost : null, dh = dayHome(x);
     return `<section class="hold"><div class="hold-g">
-      <div><small>Shares</small><b>${nf(x.sh, x.sh % 1 ? 2 : 0)}</b></div><div><small>Value</small><b>${homeMoney(v, x.cur)}</b></div>
-      <div><small>Today</small><b class="${cls(dh != null ? dh : dayPct(x))}">${dh != null ? signed(dh, HOME()) + (foreign(x.cur) ? `<small class="orig">${signed(x.sh * (x.price - x.prev), x.cur)}</small>` : "") : x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—"}</b></div>
-      <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? homeMoney(g, x.cur, false, true) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
+      <div><small>Shares</small><b>${P(nf(x.sh, x.sh % 1 ? 2 : 0))}</b></div><div><small>Value</small><b>${P(homeMoney(v, x.cur))}</b></div>
+      <div><small>Today</small><b class="${cls(dh != null ? dh : dayPct(x))}">${P(dh != null ? signed(dh, HOME()) + (foreign(x.cur) ? `<small class="orig">${signed(x.sh * (x.price - x.prev), x.cur)}</small>` : "") : x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—")}${priv() ? ` <small>${pct(dayPct(x))}</small>` : ""}</b></div>
+      <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? P(homeMoney(g, x.cur, false, true)) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
       ${foreign(x.cur) && fxr(x.cur) != null ? `<p class="note">In ${esc(HOME())} at today's rate; the stock trades in ${esc(x.cur)}.</p>` : ""}
-      ${x.cost ? `<p class="note">Average price ${money(x.cost, x.cur)}</p>` : ""}</section>`;
+      ${x.cost ? `<p class="note">Average price ${P(money(x.cost, x.cur))}</p>` : ""}</section>`;
   }
   function signalHTML(x) {
     if (x.sig) return `<section class="sigsec"><h3 class="sec">Stockit's view</h3>
@@ -2583,7 +2599,7 @@ function clientApp() {
     const d = dayPct(x), own = x.list === "own" && x.sh, dh = own ? dayHome(x) : null, todayMoney = dh != null ? dh : own && x.prev != null && x.price != null ? x.sh * (x.price - x.prev) : null, tmCur = dh != null ? HOME() : x.cur;
     const r = ratingWord(x.f && x.f.rating), c = x.crowd, crowd = c && c.bull + c.bear >= 5 ? Math.round(c.bull / (c.bull + c.bear) * 100) : null;
     return `<span class="pill ${cls(d)}">${pct(d)}</span>
-      ${own ? `<span class="fl-k">${nf(x.sh, x.sh % 1 ? 2 : 0)} share${x.sh === 1 ? "" : "s"}</span><span class="fl-m ${cls(todayMoney)}">${todayMoney != null ? signed(todayMoney, tmCur) + " today" : ""}</span>`
+      ${own ? `<span class="fl-k">${P(nf(x.sh, x.sh % 1 ? 2 : 0))} share${x.sh === 1 ? "" : "s"}</span><span class="fl-m ${cls(todayMoney)}">${todayMoney != null ? P(signed(todayMoney, tmCur)) + " today" : ""}</span>`
         : x.list !== "own" ? `<span class="fl-k">Watching</span>` : `<span class="fl-k">Shares not set</span>`}
       ${x.sig ? sigChip(x.sig) : x.trend ? `<span class="chip t-${x.trend.trend}">${TREND[x.trend.trend]}</span>` : ""}
       ${r ? `<span class="fl-r" title="Average analyst rating">Analysts <b>${esc(r[0])}</b>${r[1] ? ` <span class="muted">${esc(r[1])}</span>` : ""}</span>` : ""}
@@ -2949,10 +2965,11 @@ function clientApp() {
     const items = C.items.slice().sort((a, b) => (!!a.resolved - !!b.resolved) || order[ckStatus(a)] - order[ckStatus(b)]);
     const count = k => C.items.filter(i => ckStatus(i) === k).length, todo = C.items.filter(i => i.kind !== "match" && !i.resolved).length;
     const m2 = (v, c2) => v == null ? "—" : money(v, c2);
-    const fld = (it, f, label, val, c2) => `<label class="ck-f"><span>${label}${c2 ? ` (${esc(c2)})` : ""}</span><input class="ck-in" inputmode="decimal" data-id="${it.id}" data-f="${f}" value="${esc(ckEdit[it.id] && ckEdit[it.id][f] != null ? ckEdit[it.id][f] : val != null ? +(+val).toFixed(4) : "")}"></label>`;
-    const nsh = v => nf(v, v % 1 ? 4 : 0);
+    const fldReal = (it, f, label, val, c2) => `<label class="ck-f"><span>${label}${c2 ? ` (${esc(c2)})` : ""}</span><input class="ck-in" inputmode="decimal" data-id="${it.id}" data-f="${f}" value="${esc(ckEdit[it.id] && ckEdit[it.id][f] != null ? ckEdit[it.id][f] : val != null ? +(+val).toFixed(4) : "")}"></label>`;
+    const fld = (...a) => priv() ? `<p class="note">Turn off privacy (the eye at the top) to see and edit amounts.</p>` : fldReal(...a);
+    const nsh = v => priv() ? "••••" : nf(v, v % 1 ? 4 : 0);
     const cmp = it => {
-      const yh = it.kind === "missing";
+      const yh = it.kind === "missing", m2 = (v, c2) => v == null ? "—" : priv() ? "••••" : money(v, c2);
       const row = (label, a, b, bad) => `<div class="ck-r ${bad ? "bad" : ""}"><span>${label}</span><b>${a}</b><b>${b}</b><i>${bad ? "≠" : a !== "—" && b !== "—" ? "✓" : ""}</i></div>`;
       if (it.kind === "extra") return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>Stockit</span><span>Broker</span><i></i></div>${row("Shares", nsh(it.mine.sh), "not shown", true)}${row("Price now", m2(it.mine.price, it.cur), "—", false)}</div>`;
       return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>${yh ? "Yahoo" : "Stockit"}</span><span>Broker</span><i></i></div>
@@ -2979,7 +2996,7 @@ function clientApp() {
       <section class="sum ck-res"><span class="sum-k">Checked ${C.n} position${C.n === 1 ? "" : "s"}${C.broker ? " from " + esc(C.broker) : ""}</span>
         <div class="sum-v ${todo ? "" : "up"}">${todo ? `${todo} to review` : "All in step ✓"}</div>
         <div class="ck-chips">${["match", "differs", "price", "watch", "missing", "extra"].map(k => chip(k, count(k))).join("")}</div>
-        ${C.total != null ? `<p class="ck-tot">Broker's total ${money(C.total, C.totalCur || (C.mineTotal || {}).cur)}${C.mineTotal ? ` · Stockit ${money(C.mineTotal.v, C.mineTotal.cur)}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : ""}
+        ${C.total != null ? `<p class="ck-tot">Broker's total ${P(money(C.total, C.totalCur || (C.mineTotal || {}).cur))}${C.mineTotal ? ` · Stockit ${P(money(C.mineTotal.v, C.mineTotal.cur))}${C.totalInMine != null ? ` <small class="${Math.abs(C.totalInMine / C.mineTotal.v - 1) > 0.02 ? "down" : "muted"}">${pct((C.mineTotal.v / C.totalInMine - 1) * 100, 1)}</small>` : ""}` : ""}</p>` : ""}
         <p class="note">Read by ✦ ${PN[C.by] || esc(C.by)} ${rel(C.at)} from ${C.shots} screenshot${C.shots === 1 ? "" : "s"}. AI can misread a screenshot, so check a suggestion before you apply it.</p></section>
       ${(C.thumbs || []).length ? thumbs(C.thumbs, false) : ""}
       <div class="ck-list">${items.map(card).join("")}</div>
@@ -3079,6 +3096,7 @@ function clientApp() {
         if (stratArmed !== v) { stratArmed = v; render(); setTimeout(() => { if (stratArmed === v) { stratArmed = null; render(); } }, 3500); break; }
         stratArmed = null; send("stratdelete", { v }); break;
       case "mktopen": tab = v; render(); break;
+      case "privacy": S.settings.privacy = !priv(); send("set", { k: "privacy", v: S.settings.privacy }); renderPriv(); renderAll(); window.toast(priv() ? "Your amounts are hidden" : "Your amounts are showing"); break;
       case "checkopen": checkOpen = true; renderCheck(); $("#checksheet").scrollTop = 0; break;
       case "checkclose": checkOpen = false; renderCheck(); break;
       case "checkrun": ckProg = { p: 0.02, label: "Starting…" }; ckShown = 0.02; send("checkrun", {}); renderCheck(); break;
@@ -3229,6 +3247,11 @@ button[disabled]{opacity:.55}
 .brand-mark{width:30px;height:30px;border-radius:7px;background:#0E1116;flex:none}
 .brand .x{color:var(--up)}
 .status{font-size:calc(12.5px * var(--ts));color:var(--muted);margin-top:3px;min-height:1.2em}
+.st-row{display:flex;align-items:center;gap:6px;margin-top:3px} .st-row .status{margin-top:0}
+.privbtn{width:24px;height:24px;flex:none;border-radius:12px;display:grid;place-items:center;color:var(--muted);opacity:.75}
+.privbtn svg{width:16px;height:16px}
+.privbtn.on{color:var(--paper);background:var(--signal);opacity:1}
+.pv{display:inline-block;letter-spacing:.12em;color:var(--muted);font-weight:700;filter:blur(.3px);user-select:none;-webkit-user-select:none}
 .tb-a{display:flex;gap:6px}
 .icon{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;background:var(--sheet);border:1px solid var(--rule)}
 .icon svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -3727,7 +3750,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
   <div class="spTag">Track. Read. Decide.</div>
 </div>
 <header id="top">
-  <div class="tb"><div><h1 class="brand"><svg class="brand-mark" viewBox="0 0 240 240" aria-hidden="true">${LOGO_SVG}</svg><span>Stock<span class="x">it</span></span></h1><div id="status" class="status"></div></div>
+  <div class="tb"><div><h1 class="brand"><svg class="brand-mark" viewBox="0 0 240 240" aria-hidden="true">${LOGO_SVG}</svg><span>Stock<span class="x">it</span></span></h1><div class="st-row"><div id="status" class="status"></div><button id="privbtn" class="privbtn" data-act="privacy" aria-pressed="false" aria-label="Hide your amounts"></button></div></div>
     <div class="tb-a"><button class="icon" data-act="cfgopen" aria-label="Settings">${SETTINGS_SVG}</button>
     <button class="icon" data-act="addopen" aria-label="Add stocks">${ADD_SVG}</button>
     <button class="icon rf" data-act="refresh" aria-label="Refresh prices and news">${REFRESH_SVG}</button></div></div>
@@ -3802,7 +3825,7 @@ function widgetSnapshot(pricesAt) {
   return {
     n: stocks.length, owned: stocks.filter(x => x.list === "own").length, scope: own.length ? "own" : "watch",
     dayPct: tot && tot.value - tot.day ? tot.day / (tot.value - tot.day) * 100 : avg,
-    value: tot && settings.widgetMoney ? { v: tot.value, day: tot.day, cur: tot.cur } : null,
+    value: tot && settings.widgetMoney && !settings.privacy ? { v: tot.value, day: tot.day, cur: tot.cur } : null,   // privacy mode hides it here too
     movers: base.slice().sort((a, b2) => Math.abs(b2.chg) - Math.abs(a.chg)).slice(0, 6),
     headline: b && Date.now() - b.at < 48 * 3600e3 ? b.headline : "",
     prices: pricesAt || settings.lastRefresh || 0,

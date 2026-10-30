@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.10.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.11.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -120,6 +120,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
 | ✦ **A story per stock** | What the company does, what's happening now and why, whether the price looks cheap or expensive, why buy, what could go wrong and what to watch, with numbered links to its sources. |
 | ✦ **Ideas** | New stocks worth a closer look, picked for your investing style, your strategies and your themes, from what's trending and from good-value lists. Each comes with its key numbers and technicals (P/E, dividend yield, market cap, 50- and 200-day averages, RSI and more); tap one to open its full stock page before you add it. |
+| 👁 **Privacy for demos** | One tap on the small eye at the top hides your amounts (value, gains, shares, average prices) as ••••, so you can show Stockit to anyone. Prices, percentages and charts stay. |
 | 📸 **Check against your broker** | Upload screenshots of your broker's portfolio: ✦ AI reads every position and Stockit lists what's missing, what you no longer hold, and where shares, average prices or prices differ. Each is a suggestion you apply, edit or ignore; nothing changes on its own. |
 | 📥 **Bring them in fast** | Search by name or ticker, paste a list (`AAPL 10 @ 150`, `MSFT, NVDA`), open a broker CSV export, or ✦ read the tickers from a screenshot. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
@@ -129,6 +130,22 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Privacy for demos
+
+<img src="docs/screenshots/31-privacy.png" width="250" align="right" alt="The portfolio with privacy on: the value and gains shown as dots, percentages still visible, and the eye button highlighted">
+
+Showing Stockit to someone? Tap the **small eye** beside **Updated** at the top left. It turns blue and your amounts become **••••**:
+
+- Portfolio value, today's change and gain since you bought (the percentages stay).
+- Each stock's shares, value, today's money, gain and average price, on its page, in the lists and in Flash.
+- The amounts in a portfolio check (editing waits until privacy is off).
+- Amounts and share counts inside ✦ AI texts and in your strategies.
+- The widget's amounts, even if **Show portfolio value in the widget** is on.
+
+Market prices, percentages, charts, headlines and ideas stay visible, so the demo still shows everything Stockit does. Privacy stays on, even after closing Stockit, until you tap the eye again.
+
+<br clear="right">
 
 ## Check against your broker
 
@@ -325,6 +342,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Hide your amounts for a demo | Tap the small **eye** beside **Updated**; tap again to show them |
 | Check Stockit against your broker | Tap the **✓ shield** on your portfolio, add screenshots, tap **Check**, then apply or ignore each suggestion |
 | Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |
 | Change the themes for ideas | **Ideas › Themes you like** |
