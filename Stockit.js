@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.13.2';
+const VERSION = '1.13.3';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -46,7 +46,7 @@ const BLUEPRINTS = [
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
-  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.0', since: '1.13.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
 ];
 
 // ---------- config ----------
@@ -206,18 +206,35 @@ function startLog(msg) {
     lfm.writeString(LOG_PATH, old.concat(line).join("\n"));
   } catch (e) {}
 }
-const loadIssues = [];   // files iCloud didn't hand over in time
+const loadIssues = [];    // files that didn't arrive (iCloud too slow, or unreadable): never written this run
+const loadRepaired = [];  // files that arrived damaged: kept aside as <name>.broken-<time>.json, then started fresh
 async function load(n, def, waitMs = 10000) {
   const p = P(n);
   if (!fm.fileExists(p)) return def;
+  let txt;
   try {
     if (fm.isFileStoredIniCloud(p) && !fm.isFileDownloaded(p)) {
-      // iCloud can take a long time (or forever, offline): never let start-up hang on it (as BlogPulse 1.9.1)
+      // iCloud can take a long time (or forever, offline): never let start-up hang on it
       await Promise.race([fm.downloadFileFromiCloud(p), new Promise(r => Timer.schedule(waitMs, false, r))]);
       if (!fm.isFileDownloaded(p)) { loadIssues.push(n); startLog(`iCloud didn't deliver ${n}.json in ${waitMs / 1000} s`); return def; }
     }
-    return JSON.parse(fm.readString(p));
-  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // a broken file falls back to defaults, never crashes
+    txt = fm.readString(p);
+  } catch (e) { loadIssues.push(n); startLog(`Couldn't read ${n}.json: ${e}`); return def; }   // not read: never saved over
+  try { return JSON.parse(txt); }
+  catch (e) { keepBroken(fm, p, n, txt); return def; }
+}
+// It arrived but is damaged: keep a copy next to it, then start this file fresh so saving can carry on (1.1.0).
+// Without this, one damaged file stopped the app from ever saving again. The widget reads the data on every refresh
+// and never saves, so a copy that's already there is not made again. The parse error isn't logged: it can quote the file.
+function keepBroken(fm, p, n, txt) {
+  try {
+    const base = p.replace(/\.json$/, ""), dir = p.slice(0, p.lastIndexOf("/")), pre = base.slice(dir.length + 1) + ".broken-";
+    let kept = false;
+    try { kept = fm.listContents(dir).some(f => f.startsWith(pre) && fm.readString(fm.joinPath(dir, f)) === txt); } catch (_) {}
+    if (!kept) fm.writeString(base + ".broken-" + Date.now() + ".json", txt);
+    if (!loadRepaired.includes(n)) loadRepaired.push(n);
+    startLog(`${n}.json was damaged (not valid JSON); ${kept ? "a copy was already kept" : "kept a copy"} and started it fresh`);
+  } catch (e) { loadIssues.push(n); startLog(`${n}.json was damaged and couldn't be copied aside`); }   // no copy, no overwrite
 }
 // Data files are only written once they were read, so a slow start can never save an empty list over them.
 let dataLoaded = false;
@@ -250,7 +267,7 @@ let tldrs = {};         // TL;DRs and news stories by headline link, newest 150 
 let fxRates = {};       // exchange rates to your currency: { "USDEUR": { rate, prev, at } }
 let strategies = [];    // the investor's own plans: [{ id, text, when, status: "active" | "retired", at, retiredAt }]
 async function loadData() {
-  loadIssues.length = 0;
+  loadIssues.length = 0;   // loadRepaired is kept, so a damaged settings.json (read before this) still gets its toast
   stocks = await load("stocks", []);
   market = await load("market", {});
   insights = await load("insights", { briefing: null, stories: {}, ideas: null });
@@ -1885,7 +1902,9 @@ function clientApp() {
     send("aiinvite", { v: what });
     if (what === "open") setTimeout(function () {
       window.__aiOpen();   // the same thing the Settings row's "aiopen" action does
-      var add = document.querySelector('#aisheet [data-act="aikey"]');   // the provider in use comes first
+      // The Add key of the provider in use: its card is the one marked .active (never "the first button", which
+      // is the wrong provider in any app whose sheet doesn't put the provider in use first).
+      var add = document.querySelector('#aisheet .aicard.active [data-act="aikey"]') || document.querySelector('#aisheet [data-act="aikey"]');
       if (add) { add.classList.add("aiinv-nudge"); if (add.scrollIntoView) add.scrollIntoView({ block: "center" }); setTimeout(function () { add.classList.remove("aiinv-nudge"); }, 2600); }
     }, 280);
   }
@@ -4282,6 +4301,7 @@ async function bootApp(isClosed) {
   try { seen = await ev(`document.visibilityState + ", " + innerWidth + "x" + innerHeight`, 5000); } catch (e) { seen = String(e.message || e); }
   startLog(`screen ready in ${((Date.now() - t0) / 1000).toFixed(1)} s (page: ${seen})`);
   if (loadIssues.length) toast("Some of your data is still coming from iCloud. Nothing will be saved until you reopen Stockit.");
+  else if (loadRepaired.length) toast("Some of your data couldn't be read, so Stockit kept a copy and started it fresh.");
   // Deferred work, once the first screen is drawn: prices and news, then updates, then the widget's icon.
   Timer.schedule(700, false, () => {
     if (isClosed() || !dataLoaded) return;
