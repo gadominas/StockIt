@@ -4,6 +4,35 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.13.1",
+      "date": "2026-10-30",
+      "title": "No key, no AI",
+      "highlights": [
+        {
+          "icon": "🔑",
+          "title": "The key decides",
+          "text": "Without a key AI is off, so the invitation can show again, even if you had a key before."
+        },
+        {
+          "icon": "⚡",
+          "title": "Right after you remove it",
+          "text": "Remove your last key and the invitation can show the next time you open Stockit."
+        },
+        {
+          "icon": "🤫",
+          "title": "Still never pushy",
+          "text": "Later waits a few days, and Don't remind me again still ends it for good."
+        }
+      ],
+      "changes": [
+        "AI invitation 1.1.0: whether a key exists is the only test; a key you had before no longer turns the invitation off for good",
+        "Removing the last key makes it eligible from the next launch, without the first-day wait"
+      ],
+      "fixes": [
+        "The invitation never appeared for anyone who had a key when 1.13.0 first ran, even after removing it"
+      ]
+    },
+    {
       "version": "1.13.0",
       "date": "2026-10-30",
       "title": "An invitation to AI",

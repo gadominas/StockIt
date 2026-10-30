@@ -2,6 +2,21 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.13.1 (2026-10-30): No key, no AI
+
+- 🔑 **The key decides**: Without a key AI is off, so the invitation can show again, even if you had a key before.
+- ⚡ **Right after you remove it**: Remove your last key and the invitation can show the next time you open Stockit.
+- 🤫 **Still never pushy**: Later waits a few days, and Don't remind me again still ends it for good.
+
+**Changes**
+
+- AI invitation 1.1.0: whether a key exists is the only test; a key you had before no longer turns the invitation off for good
+- Removing the last key makes it eligible from the next launch, without the first-day wait
+
+**Fixes**
+
+- The invitation never appeared for anyone who had a key when 1.13.0 first ran, even after removing it
+
 ## 1.13.0 (2026-10-30): An invitation to AI
 
 - ✦ **See what AI adds**: Now and then, without a key, Stockit shows what AI adds: the briefing, ideas and stories.
