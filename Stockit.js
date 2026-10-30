@@ -26,7 +26,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -80,7 +80,7 @@ const CONFIG = [
     { k: "aiHeadlines", label: "Headlines AI reads per stock", help: "More gives richer stories but uses more tokens", unit: "headlines", def: 6, min: 2, max: 15, step: 1 },
     { k: "tldrChars", label: "Article text sent for a TL;DR", help: "More gives fuller TL;DRs but uses more tokens", unit: "chars", def: 12000, min: 2000, max: 30000, step: 1000 },
     { k: "ideasCount", label: "Ideas per request", unit: "ideas", def: 5, min: 3, max: 10, step: 1 },
-    { k: "ideaThemes", label: "Themes for ideas", help: "One per line; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
+    { k: "ideaThemes", label: "Themes for ideas", help: "Edited in the Ideas tab; AI looks for stocks that fit them", type: "lines", def: ["Quality companies at a fair price", "Steady dividend payers", "Long-term growth trends"] },
   ]],
   ["Widget", [
     { k: "widgetRefreshMin", label: "Ask iOS to refresh every", help: "iOS decides the exact timing", unit: "min", def: 30, min: 15, max: 240, step: 15 },
@@ -167,6 +167,16 @@ function trendOf(m) {
   if (st.p6m != null) { if (st.p6m > 5) score++; else if (st.p6m < -5) score--; why.push(`${st.p6m >= 0 ? "up" : "down"} ${Math.abs(st.p6m).toFixed(0)}% in 6 months`); }
   return { trend: score >= 2 ? "up" : score <= -2 ? "down" : "flat", why: "Price is " + why.join(", ").replace(/, ([^,]*)$/, " and $1") + "." };
 }
+// RSI over 14 days (Wilder): above 70 the price has risen fast lately, below 30 it has fallen fast.
+function rsi14(pts) {
+  const c = (pts || []).map(p => p[1]);
+  if (c.length < 16) return null;
+  let g = 0, l = 0;
+  for (let i = 1; i <= 14; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= 14; l /= 14;
+  for (let i = 15; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * 13 + Math.max(d, 0)) / 14; l = (l * 13 + Math.max(-d, 0)) / 14; }
+  return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+}
 // ---------- end pure helpers ----------
 
 // ---------- storage ----------
@@ -205,7 +215,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {},    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {},    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -564,7 +574,7 @@ async function runRefresh(force = false) {
     await loadFx(force).catch(e => console.log("Exchange rates: " + e));
     const stale = syms.filter(s => market[s] && (force || !market[s].fAt || Date.now() - market[s].fAt > cfg("fundHours") * 3600e3));
     if (stale.length) await loadFundamentals(stale).catch(e => console.log(String(e)));
-    for (const k of Object.keys(market)) if (!syms.includes(k)) delete market[k];
+    for (const k of Object.keys(market)) if (!syms.includes(k) && !previews.has(k)) delete market[k];
     if (syms.length) settings.lastRefresh = Date.now();
     call("onProgress", 0, 0);
     saveAll(); push(); saveWidget(widgetSnapshot());
@@ -781,7 +791,7 @@ Include every symbol above in "stocks". Owned stocks matter most.`;
 // A deeper story for one stock, when the user asks for it.
 const storyBusy = new Set();
 async function runStory(sym) {
-  const x = stocks.find(y => y.s === sym);
+  const x = stocks.find(y => y.s === sym) || (previews.has(sym) ? { s: sym, name: (market[sym] || {}).name || sym, list: "preview" } : null);
   if (!x || storyBusy.has(sym)) return;
   if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
   storyBusy.add(sym); call("onBusy", "story:" + sym, true);
@@ -844,14 +854,28 @@ JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2
       const sym = String(it.symbol || "").toUpperCase().trim();
       if (!sym || mine.has(sym)) return;
       try {
-        const { meta, pts } = await yChart(sym, "1mo", "1d");
+        const { meta, pts } = await yChart(sym, "1y", "1d");   // a year: averages, range, performance and RSI
         const q = priceFrom(meta, pts);
+        const pm = { pts, price: q.price, prev: q.prev, hi52: num(meta.fiftyTwoWeekHigh), lo52: num(meta.fiftyTwoWeekLow) };
+        it.__x = { st: stats(pm), trend: trendOf(pm), rsi: rsi14(pts), exch: meta.fullExchangeName || meta.exchangeName || "", tz: meta.exchangeTimezoneName || "", year: pts };
         list.push({ s: meta.symbol || sym, name: meta.longName || meta.shortName || it.name || sym, why: String(it.why || ""), fit: String(it.fit || ""), risk: String(it.risk || ""),
-          signal: it.signal === "hold" ? "hold" : "buy", price: q.price, prev: q.prev, cur: meta.currency, pts, order: (o.ideas || []).indexOf(it),
+          signal: it.signal === "hold" ? "hold" : "buy", price: q.price, prev: q.prev, cur: meta.currency, pts: pts.slice(-23), order: (o.ideas || []).indexOf(it),
+          st: it.__x.st, trend: it.__x.trend, rsi: it.__x.rsi, exch: it.__x.exch, tz: it.__x.tz, year: it.__x.year,
           serves: strategies.some(g => g.id === it.serves) ? it.serves : "" });
       } catch (e) {}   // a ticker Yahoo doesn't know is left out
     });
     list.sort((a, b) => a.order - b.order);
+    // Company numbers and profile for each idea, through the same loaders the stock pages use (kept apart from your stocks)
+    const tmp = list.filter(it => !market[it.s]).map(it => it.s);
+    for (const it of list) market[it.s] = market[it.s] || { pts: it.year, price: it.price, prev: it.prev, cur: it.cur };
+    await loadFundamentals(list.map(it => it.s)).catch(() => {});
+    await pool(list, cfg("concurrency"), it => loadProfile(it.s).catch(() => {}));
+    for (const it of list) {
+      const m = market[it.s] || {};
+      it.f = m.f || {}; it.prof = m.prof ? { sector: m.prof.sector, industry: m.prof.industry, about: m.prof.about } : null;
+      delete it.year;
+    }
+    for (const s2 of tmp) if (!stocks.some(x => x.s === s2) && !previews.has(s2)) delete market[s2];
     const notes = {};
     for (const g of Array.isArray(o.strategies) ? o.strategies : []) if (g && strategies.some(x => x.id === g.id) && g.note) notes[g.id] = String(g.note).slice(0, 500);
     insights.ideas = { list: list.slice(0, n), notes, note: String(o.note || ""), style: settings.style, by: settings.aiProvider, model: modelFor(settings.aiProvider), at: Date.now() };
@@ -1188,10 +1212,20 @@ function sigFor(sym) {
   if (bs) return Object.assign({}, bs, { by: b.by, at: b.at });
   return null;
 }
+// A stock you're looking at from Ideas, without adding it: loaded like a stock on your lists, kept for this run only.
+const previews = new Set();
+async function openPreview(sym) {
+  sym = String(sym || "").toUpperCase().trim();
+  if (!sym || stocks.some(x => x.s === sym)) return push();
+  previews.add(sym); push();
+  try { await loadPrices(sym); } catch (e) { market[sym] = Object.assign(market[sym] || {}, { err: String(e.message || e).slice(0, 80) }); }
+  push();
+  await Promise.all([loadNews(sym).catch(() => {}), loadCrowd(sym).catch(() => {}), loadFundamentals([sym]).catch(() => {}), loadProfile(sym).catch(() => {})]);
+  push();
+}
 function clientState() {
   const tot = totals();
-  return {
-    stocks: stocks.map(x => {
+  const view = x => {
       const m = market[x.s] || {};
       return {
         s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0,
@@ -1200,7 +1234,10 @@ function clientState() {
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
         story: insights.stories[x.s] || null,
       };
-    }),
+    };
+  return {
+    stocks: stocks.map(view),
+    previews: [...previews].filter(s => market[s] && !stocks.some(x => x.s === s)).map(s => view({ s, name: market[s].name || s, exch: "", list: "preview", sh: 0, cost: 0 })),
     totals: tot,
     briefing: insights.briefing ? Object.assign({}, insights.briefing, { stocks: undefined, stale: insights.briefing.sig !== briefingSig() }) : null,
     ideas: insights.ideas,
@@ -1225,7 +1262,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {},
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {},
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1297,6 +1334,7 @@ async function handle(m) {
     case "set":
       if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
+      if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
         settings.flashFold = Object.fromEntries(Object.entries(m.v).filter(([s, t]) => stocks.some(x => x.s === s) && isFinite(t)));
       if (m.k === "homeCur" && (m.v === "auto" || HOME_CURS.includes(m.v))) settings.homeCur = m.v;
@@ -1365,6 +1403,16 @@ async function handle(m) {
     case "story": return runStory(m.s);
     case "briefing": return runBriefing(true);
     case "ideas": return runIdeas();
+    case "preview": return openPreview(m.s);
+    case "addpreview": {   // from a stock's page opened from Ideas: onto your watchlist or portfolio
+      if (stocks.some(y => y.s === m.s)) return;
+      const r = await addStocks([{ s: m.s, name: (market[m.s] || {}).name || m.s }], m.v === "own" ? "own" : "watch");
+      previews.delete(m.s);
+      const x2 = stocks.find(y => y.s === m.s);
+      if (x2 && x2.list === "own") await editHolding(x2);
+      saveAll(); push(); saveWidget(widgetSnapshot());
+      return reportAdd(r);
+    }
     case "watchidea": {
       const it = insights.ideas && insights.ideas.list.find(y => y.s === m.s);
       if (!it || stocks.some(y => y.s === m.s)) return;
@@ -1463,6 +1511,7 @@ function clientApp() {
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
   let newsOpen = null; const tl = {};
+  let previewWait = null, themeText = "", ideaExplain = null;
   let stratText = "", stratWhen = "", stratArmed = null, inspecting = null, xhTimer = null, chartNow = null; const histWant = new Set();   // the headline open in the TL;DR sheet, and TL;DRs by link
   let explainKey = null, briefFull = false, progress = null, results = null, searching = false, pasteText = "";
   const busyK = new Set(), hist = {}, aiLoading = new Set();
@@ -1519,7 +1568,8 @@ function clientApp() {
   // ---- bridge ← Scriptable ----
   window.recv = st => {
     S = st; syncBusy(); aiLoading.clear();
-      if (openSym && !S.stocks.some(x => x.s === openSym)) openSym = null;
+      if (openSym && !byS(openSym) && previewWait !== openSym) openSym = null;
+    if (previewWait && byS(previewWait)) previewWait = null;
     if (newsOpen && !S.stocks.some(x => x.s === newsOpen.s)) newsOpen = null;
     renderAll();
   };
@@ -1613,7 +1663,7 @@ function clientApp() {
   const when = ts => new Date(ts).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" });
   const dayDate = (d, y) => new Date(d * 864e5).toLocaleDateString(undefined, y ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" });
   const isBusy = k => busyK.has(k);
-  const byS = s => S.stocks.find(x => x.s === s);
+  const byS = s => S.stocks.find(x => x.s === s) || (S.previews || []).find(x => x.s === s);   // previews: stocks opened from Ideas
 
   // ---- small pictures ----
   function spark(pts, c, wide) {
@@ -1928,36 +1978,72 @@ function clientApp() {
       <div class="aic-btns">${g.status === "retired"
         ? `<button class="sm" data-act="stratrestore" data-v="${esc(g.id)}">Bring back</button><button class="sm danger ${stratArmed === g.id ? "armed" : ""}" data-act="stratdelete" data-v="${esc(g.id)}">${stratArmed === g.id ? "Confirm" : "Delete"}</button>`
         : `<button class="sm" data-act="stratretire" data-v="${esc(g.id)}">Retire</button>`}</div></article>`;
-    return `<section class="strat"><h2 class="brief-t">My strategies</h2>
+    return foldSec("strat", "My strategies", `${act.length} active${ret.length ? ` · ${ret.length} retired` : ""}`, `<div class="strat">
       <p class="brief-p muted">Your own plans and directions${S.settings.hasKey ? ". ✦ Ideas, the briefing and stock stories take them into account" : ""}. Retire one when it's done or no longer what you want.</p>
       ${act.map(card).join("") || `<p class="note">No strategies yet. For example: “When Nike recovers to my average price, sell it and buy a pharmaceutical company”, or “Over the next six months, invest more in pharma companies working with AI companies”.</p>`}
       <div class="strat-add"><label for="stratText" class="lk-l">New strategy</label>
         <textarea id="stratText" rows="3" placeholder="e.g. When Nike recovers, sell it and buy a pharmaceutical company">${esc(stratText)}</textarea>
         <input id="stratWhen" class="cfgin wide" placeholder="Timing (optional), e.g. in six months, when NKE is back at $80" value="${esc(stratWhen)}">
         <div class="aic-btns"><button class="primary" data-act="stratadd">Add strategy</button></div></div>
-      ${ret.length ? `<details class="strat-ret"><summary>Retired strategies (${ret.length})</summary>${ret.map(card).join("")}</details>` : ""}</section>`;
+      ${ret.length ? `<details class="strat-ret"><summary>Retired strategies (${ret.length})</summary>${ret.map(card).join("")}</details>` : ""}</div>`, "strat-sec");
+  }
+  const folded = k => !!(S.settings.ideasFold || {})[k];
+  const foldSec = (k, title, sub, body, cls2) => `<details class="fold-sec ${cls2 || ""}" data-fold="${k}" ${folded(k) ? "" : "open"}><summary><span class="fs-t">${title}</span>${sub ? `<span class="fs-s">${sub}</span>` : ""}<span class="chev" aria-hidden="true">›</span></summary><div class="fs-b">${body}</div></details>`;
+  function themesHTML() {
+    const th = (S.cfg.ideaThemes || []).filter(Boolean);
+    return foldSec("themes", "Themes you like", `${th.length} theme${th.length === 1 ? "" : "s"}`,
+      `<p class="muted small">${S.settings.hasKey ? "✦ Ideas look for stocks that fit these, together with your strategies." : "Ideas will look for stocks that fit these."}</p>
+      <div class="themes">${th.map((t, i) => `<span class="theme">${esc(t)}<button data-act="themerm" data-v="${i}" aria-label="Remove ${esc(t)}">×</button></span>`).join("") || `<p class="note">No themes yet.</p>`}</div>
+      <div class="theme-add"><input id="themeIn" class="cfgin" placeholder="Add a theme, e.g. European banks" value="${esc(themeText)}"><button class="sm primary" data-act="themeadd">Add</button></div>`, "themes-sec");
   }
   function ideasHTML() {
     const I = S.ideas, bz = isBusy("ideas"), act = (S.strategies || []).filter(g => g.status !== "retired").length;
-    const strat = strategiesHTML();
-    if (!S.settings.hasKey) return strat + `<p class="note pad">For ✦ AI ideas that follow your strategies, add a Claude or OpenAI key in <button class="link small" data-act="cfgopen">Settings › AI settings</button>.</p>`;
-    const head = `<section class="brief"><span class="badge-ai">✦ AI ideas</span><h2 class="brief-t">Stocks worth a closer look</h2>
-      <p class="brief-p muted">Picked for a ${STYLE_L[S.settings.style] || "balanced"} investor, ${act ? `your ${act} strateg${act === 1 ? "y" : "ies"}, ` : ""}your themes and what you hold, from what's trending and from good-value lists today.</p>
-      <div class="aic-btns"><button class="primary" data-act="ideas" ${bz ? "disabled" : ""}>${bz ? "Looking…" : I ? "Find new ideas" : "Find ideas"}</button></div></section>`;
-    if (!I || !(I.list || []).length) return strat + head;
-    return strat + head + `<p class="note pad">✦ AI ideas by ${PN[I.by] || esc(I.by)}, ${rel(I.at)}. ${esc(I.note)} AI knowledge has a cutoff, so read the latest news before you buy. Not financial advice.</p>` + I.list.map(ideaCard).join("");
+    const top = strategiesHTML() + themesHTML();
+    if (!S.settings.hasKey) return top + `<p class="note pad">For ✦ AI ideas that follow your strategies and themes, add a Claude or OpenAI key in <button class="link small" data-act="cfgopen">Settings › AI settings</button>.</p>`;
+    const n = I && I.list ? I.list.length : 0;
+    const body = `<p class="brief-p muted">Picked for a ${STYLE_L[S.settings.style] || "balanced"} investor, ${act ? `your ${act} strateg${act === 1 ? "y" : "ies"}, ` : ""}your themes and what you hold, from what's trending and from good-value lists today. Tap a stock to see everything about it before you add it.</p>
+      <div class="aic-btns"><button class="primary" data-act="ideas" ${bz ? "disabled" : ""}>${bz ? "Looking…" : I ? "Find new ideas" : "Find ideas"}</button></div>
+      ${n ? `<p class="note">✦ AI ideas by ${PN[I.by] || esc(I.by)}, ${rel(I.at)}. ${esc(I.note)} AI knowledge has a cutoff, so read the latest news before you buy. Not financial advice.</p>${I.list.map(ideaCard).join("")}` : ""}`;
+    return top + foldSec("ideas", "✦ Stocks worth a closer look", n ? `${n} idea${n === 1 ? "" : "s"} · ${rel(I.at)}` : "", body, "ideas-sec");
   }
   function ideaCard(it) {
-    const d = dayPct(it), c = cls(d), have = S.stocks.some(x => x.s === it.s);
-    return `<article class="idea"><div class="idea-h"><div class="r-l"><b class="sym">${esc(it.s)}</b><small>${esc(it.name)}</small></div>
+    const d = dayPct(it), c = cls(d), have = S.stocks.some(x => x.s === it.s), f = it.f || {}, st = it.st || {}, pr = it.prof || {};
+    const up = f.target && it.price ? (f.target / it.price - 1) * 100 : null, vsMa = v => v && it.price != null ? `<small class="${cls(it.price - v)}">${pct((it.price / v - 1) * 100, 1)}</small>` : "";
+    const cell = (k, l, v) => `<button class="tile ${ideaExplain === it.s + "|" + k ? "on" : ""}" data-act="ideaexplain" data-v="${esc(it.s + "|" + k)}"><small>${l}</small><b>${v}</b></button>`;
+    const grid = [
+      cell("pe", "P/E", f.pe != null ? nf(f.pe, 1) : "—"), cell("fpe", "Forward P/E", f.fpe != null ? nf(f.fpe, 1) : "—"),
+      cell("divY", "Dividend yield", f.divY ? nf(f.divY, 2) + "%" : f.pe != null || f.mcap ? "None" : "—"), cell("mcap", "Market cap", bigN(f.mcap)),
+      cell("ma50", "50-day average", st.ma50 ? `${money(st.ma50, it.cur)} ${vsMa(st.ma50)}` : "—"), cell("ma200", "200-day average", st.ma200 ? `${money(st.ma200, it.cur)} ${vsMa(st.ma200)}` : "—"),
+      cell("rsi", "RSI, 14 days", it.rsi != null ? `${nf(it.rsi, 0)} <small>${rsiWord(it.rsi)}</small>` : "—"), cell("beta", "Beta", f.beta != null ? nf(f.beta, 2) : "—"),
+      cell("target", "Analyst target", f.target ? `${money(f.target, it.cur)} <small class="${cls(up)}">${pct(up, 0)}</small>` : "—"), cell("rating", "Analysts", f.rating ? esc(f.rating) : f.rec ? esc(cap(String(f.rec).replace(/_/g, " "))) : "—"),
+    ].concat(f.margin != null ? [cell("margin", "Profit margin", nf(f.margin, 1) + "%")] : []).concat(f.growth != null ? [cell("growth", "Revenue growth", pct(f.growth, 1))] : []);
+    const ek = ideaExplain && ideaExplain.startsWith(it.s + "|") ? ideaExplain.slice(it.s.length + 1) : null;
+    return `<article class="idea" id="idea-${esc(it.s)}"><div class="idea-h"><button class="r-l idea-open" data-act="preview" data-v="${esc(it.s)}" aria-label="See everything about ${esc(it.s)}"><b class="sym">${esc(it.s)} <span class="chev" aria-hidden="true">›</span></b><small>${esc(it.name)}</small></button>
       <div class="r-r"><b>${money(it.price, it.cur)}</b><span class="pill ${c}">${pct(d)}</span></div></div>
-      ${spark(it.pts, cls(it.pts && it.pts.length > 1 ? it.pts[it.pts.length - 1][1] - it.pts[0][1] : null), true)}<p class="cap">Last month</p>
+      ${pr.sector ? `<p class="cap">${esc([pr.sector, pr.industry].filter(Boolean).join(" › "))}${it.exch ? " · " + esc(it.exch) : ""}</p>` : it.exch ? `<p class="cap">${esc(it.exch)}</p>` : ""}
       ${it.serves && (S.strategies || []).some(g => g.id === it.serves) ? `<p class="serves">↳ For your strategy: “${esc((S.strategies.find(g => g.id === it.serves).text).slice(0, 90))}${S.strategies.find(g => g.id === it.serves).text.length > 90 ? "…" : ""}”</p>` : ""}
       <p>${esc(it.why)}</p>${it.fit ? `<p class="ink2"><b>How it fits.</b> ${esc(it.fit)}</p>` : ""}${it.risk ? `<p class="ink2"><b>Main risk.</b> ${esc(it.risk)}</p>` : ""}
-      <div class="aic-btns">${sigChip({ signal: it.signal })}<span class="grow"></span>${have ? `<span class="note">On your lists ✓</span>` : `<button class="sm primary" data-act="watchidea" data-v="${esc(it.s)}">Add to watchlist</button>`}</div></article>`;
+      ${spark(it.pts, cls(it.pts && it.pts.length > 1 ? it.pts[it.pts.length - 1][1] - it.pts[0][1] : null), true)}<p class="cap">Last month</p>
+      ${it.st ? `<div class="tiles idea-t">${grid.join("")}</div>
+      <div class="rangebox"><small>52-week range</small><div class="rbar"><i style="left:${st.pos52 == null ? 50 : st.pos52.toFixed(1)}%"></i></div>
+        <div class="rlab"><span>${money(st.lo, it.cur)}</span><span>${st.pos52 == null ? "" : "now at " + st.pos52.toFixed(0) + "% of the range"}</span><span>${money(st.hi, it.cur)}</span></div></div>
+      <div class="rangebox"><small>Performance</small><div class="perf">${[["1 month", st.p1m], ["6 months", st.p6m], ["1 year", st.p1y]].map(([l, v]) => `<span><small>${l}</small><b class="${cls(v)}">${pct(v, 1)}</b></span>`).join("")}</div></div>
+      ${it.trend ? `<p class="ink2"><span class="chip t-${it.trend.trend}">${TREND[it.trend.trend]}</span> ${esc(it.trend.why)}</p>` : ""}
+      ${ek && EXPLAIN[ek] ? `<p class="explain">${esc(EXPLAIN[ek])}</p>` : `<p class="note">Tap a number to see what it means.</p>`}` : `<p class="note">Ask for new ideas to see their numbers and technicals.</p>`}
+      <div class="aic-btns">${sigChip({ signal: it.signal })}<span class="grow"></span><button class="sm" data-act="preview" data-v="${esc(it.s)}">See everything</button>${have ? `<span class="note">On your lists ✓</span>` : `<button class="sm primary" data-act="watchidea" data-v="${esc(it.s)}">Add to watchlist</button>`}</div></article>`;
   }
 
   // ---- one stock ----
+  function rsiC(pts) {   // RSI over 14 days (Wilder), from daily closes
+    const c = (pts || []).map(p => p[1]);
+    if (c.length < 16) return null;
+    let g = 0, l = 0;
+    for (let i = 1; i <= 14; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l -= d; }
+    g /= 14; l /= 14;
+    for (let i = 15; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * 13 + Math.max(d, 0)) / 14; l = (l * 13 + Math.max(-d, 0)) / 14; }
+    return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  const rsiWord = r => r >= 70 ? "risen fast" : r <= 30 ? "fallen fast" : "neutral";
   const EXPLAIN = {
     pe: "P/E (price to earnings): how many dollars investors pay for each $1 of yearly profit. Higher usually means more growth is expected; compare it with similar companies, not across industries.",
     fpe: "Forward P/E: the same idea, using next year's expected profit. Lower than the P/E means profit is expected to grow.",
@@ -1971,12 +2057,19 @@ function clientApp() {
     growth: "Revenue growth: how much sales grew compared with a year earlier.",
     range: "52-week range: the lowest and highest price in the last year, and where today's price sits between them.",
     perf: "Performance: how much the price changed over each period. Dividends aren't included.",
+    ma50: "50-day average: the average closing price over the last 50 trading days, about ten weeks. A price above it means the recent trend is up; the small number is how far the price is from it.",
+    ma200: "200-day average: the average over about ten months, the classic long-term trend line. Above it, the long-term trend is up; below it, down.",
+    rsi: "RSI (relative strength index, 14 days): from 0 to 100, how strongly the price has moved lately. Above 70 it has risen fast and may pause; below 30 it has fallen fast and may bounce. A hint, not a rule.",
     crowd: "Crowd mood: recent StockTwits posts tagged bullish versus bearish. Loud and fast-moving, not always right.",
   };
   function renderDetail() {
     const el = $("#detail"), keep = el.scrollTop;
     const x = openSym && byS(openSym);
-    el.classList.toggle("open", !!x); lockBody();
+    el.classList.toggle("open", !!x || (!!openSym && previewWait === openSym)); lockBody();
+    if (!x && openSym && previewWait === openSym) {   // a stock from Ideas, still loading
+      el.innerHTML = `<div class="sh-head"><h2>${esc(openSym)}</h2><button class="link" data-act="close">Done</button></div><div class="sh-body"><div class="booting" role="status"><span class="busy-dot"></span>Loading ${esc(openSym)}…</div></div>`;
+      return;
+    }
     if (!x) return;
     const d = dayPct(x), c = cls(d);
     const hk = x.s + "|" + range;
@@ -2035,6 +2128,9 @@ function clientApp() {
       ["target", "Analyst target", f.target ? `${money(f.target, x.cur)} <small class="${cls(up)}">${pct(up, 0)}</small>` : "—"],
       ["rating", "Analysts", f.rating ? esc(f.rating) : f.rec ? esc(cap(String(f.rec).replace(/_/g, " "))) : "—"],
     ].concat(f.margin != null ? [["margin", "Profit margin", nf(f.margin, 1) + "%"]] : []).concat(f.growth != null ? [["growth", "Revenue growth", pct(f.growth, 1)]] : []);
+    const rsi = rsiC(x.pts), vsMa = v => v && x.price != null ? ` <small class="${cls(x.price - v)}">${pct((x.price / v - 1) * 100, 1)}</small>` : "";
+    tiles.push(["ma50", "50-day average", st.ma50 ? money(st.ma50, x.cur) + vsMa(st.ma50) : "—"], ["ma200", "200-day average", st.ma200 ? money(st.ma200, x.cur) + vsMa(st.ma200) : "—"],
+      ["rsi", "RSI, 14 days", rsi != null ? `${nf(rsi, 0)} <small>${rsiWord(rsi)}</small>` : "—"]);
     const c = x.crowd, crowd = c && c.bull + c.bear >= 5 ? Math.round(c.bull / (c.bull + c.bear) * 100) : null;
     const ex = explainKey && EXPLAIN[explainKey] ? `<p class="explain">${esc(EXPLAIN[explainKey])}</p>` : `<p class="note">Tap a number to see what it means.</p>`;
     return `<section><h3 class="sec">Key numbers</h3>
@@ -2061,6 +2157,8 @@ function clientApp() {
       : `<p class="muted">${x.newsAt ? "No headlines in the last few days." : "Headlines load in a moment…"}</p>`}</section>`;
   }
   function manageHTML(x) {
+    if (x.list === "preview") return `<section class="manage"><h3 class="sec">Not on your lists yet</h3><p class="muted">You're looking at ${esc(x.s)} from Ideas. Add it to follow it like your other stocks.</p>
+      <div class="aic-btns"><button class="sm primary" data-act="addpreview" data-v="watch" data-s="${esc(x.s)}">Add to watchlist</button><button class="sm" data-act="addpreview" data-v="own" data-s="${esc(x.s)}">I own this</button></div></section>`;
     return `<section class="manage"><h3 class="sec">Manage</h3><div class="aic-btns">
       ${x.list === "own" ? `<button class="sm" data-act="holding" data-v="${esc(x.s)}">Edit shares</button><button class="sm" data-act="move" data-v="watch" data-s="${esc(x.s)}">Move to watchlist</button>`
         : `<button class="sm primary" data-act="move" data-v="own" data-s="${esc(x.s)}">I own this</button>`}
@@ -2150,7 +2248,7 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
       <div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Stockit opened</small></div><button class="sm" data-act="startlog">Show</button></div>
       <pre id="startlog" class="startlog" hidden></pre>
-      ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.map(field).join("")}`).join("")}
+      ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.filter(d2 => d2.k !== "ideaThemes").map(field).join("")}${sec.items.some(d2 => d2.k === "ideaThemes") ? `<p class="note">Themes for ideas are in the <button class="link small" data-act="gotab" data-v="ideas">Ideas tab</button>.</p>` : ""}`).join("")}
       <div class="aic-btns cfg-foot"><span class="note">${changed ? changed + " setting" + (changed === 1 ? "" : "s") + " changed" : "All settings are at their original values"}</span>
         ${changed ? `<button class="sm danger ${cfgArmed ? "armed" : ""}" data-act="cfgall">${cfgArmed ? "Confirm reset" : "Reset all"}</button>` : ""}</div>
       ${builtWithHTML()}
@@ -2579,7 +2677,7 @@ function clientApp() {
     searching = true; results = null; renderAdd(); send("search", { q: v.trim() });
   }
   document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "q") { e.preventDefault(); e.target.blur(); find(); } });
-  document.addEventListener("input", e => { if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
+  document.addEventListener("input", e => { if (e.target.id === "themeIn") themeText = e.target.value; if (e.target.id === "paste") pasteText = e.target.value; if (e.target.id === "stratText") stratText = e.target.value; if (e.target.id === "stratWhen") stratWhen = e.target.value; });
   document.addEventListener("click", e => {
     if (e.target.closest("select, option, input, textarea, summary")) return;   // form controls handle themselves
     const t = e.target.closest("[data-act]");
@@ -2621,6 +2719,17 @@ function clientApp() {
         if (stratArmed !== v) { stratArmed = v; render(); setTimeout(() => { if (stratArmed === v) { stratArmed = null; render(); } }, 3500); break; }
         stratArmed = null; send("stratdelete", { v }); break;
       case "mktopen": tab = v; render(); break;
+      case "ideaexplain": ideaExplain = ideaExplain === v ? null : v; render(); break;
+      case "gotab": cfgOpen = false; renderCfg(); tab = v; send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
+      case "preview": openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
+      case "addpreview": send("addpreview", { s: t.dataset.s, v }); previewWait = null; break;
+      case "themeadd": {
+        const tx = themeText.trim().slice(0, 120);
+        if (!tx) { const ti = $("#themeIn"); if (ti) ti.focus(); break; }
+        const list = (S.cfg.ideaThemes || []).concat(tx).slice(0, 20); S.cfg.ideaThemes = list; themeText = "";
+        send("cfg", { k: "ideaThemes", v: list }); render(); break;
+      }
+      case "themerm": { const list = (S.cfg.ideaThemes || []).filter((_, i) => i !== +v); S.cfg.ideaThemes = list; send("cfg", { k: "ideaThemes", v: list.length ? list : [""] }); render(); break; }
       case "open": openSym = v; explainKey = null; rmArmed = null; renderDetail(); send("detail", { s: v }); $("#detail").scrollTop = 0; break;
       case "close": openSym = null; renderDetail(); break;
       case "range": range = v; send("set", { k: "range", v }); renderDetail(); break;
@@ -2690,7 +2799,9 @@ function clientApp() {
     }
   });
   // Typed values and menus arrive through "change"
-  document.addEventListener("toggle", e => { const el = e.target; if (el.classList && el.classList.contains("fl-story")) { if (el.open) dgOpen.add(el.dataset.k); else dgOpen.delete(el.dataset.k); } }, true);
+  document.addEventListener("toggle", e => { const el = e.target;
+    if (el.classList && el.classList.contains("fold-sec")) { const f = Object.assign({}, S.settings.ideasFold || {}); f[el.dataset.fold] = !el.open; if (!!(S.settings.ideasFold || {})[el.dataset.fold] !== !el.open) { S.settings.ideasFold = f; send("set", { k: "ideasFold", v: f }); } return; }
+    if (el.classList && el.classList.contains("fl-story")) { if (el.open) dgOpen.add(el.dataset.k); else dgOpen.delete(el.dataset.k); } }, true);
   document.addEventListener("change", e => {
     if (e.target.id === "homeCur") { S.fx = Object.assign({}, S.fx, { choice: e.target.value }); send("set", { k: "homeCur", v: e.target.value }); window.toast("Converting to " + (e.target.value === "auto" ? "your main currency" : e.target.value) + "…"); return; }
     if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
@@ -3081,6 +3192,27 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .xtip b{font-size:calc(15px * var(--ts))} .xtip small{flex-basis:100%;font-size:calc(11.5px * var(--ts));opacity:.8}
 .xtip .up{color:#86efac} .xtip .down{color:#fca5a5}
 .rng button{padding-left:4px;padding-right:4px}
+/* Ideas: sections that fold, themes, rich idea cards */
+.fold-sec{background:var(--sheet);border:1px solid var(--rule);border-radius:12px;margin:10px 0 14px;overflow:hidden}
+.fold-sec.strat-sec{border-left:4px solid var(--amber)} .fold-sec.ideas-sec{border-left:4px solid var(--signal)}
+.fold-sec>summary{display:flex;align-items:center;gap:8px;padding:12px var(--pad);cursor:pointer;list-style:none}
+.fold-sec>summary::-webkit-details-marker{display:none}
+.fs-t{font:700 calc(var(--t) * 1.02 * var(--ts))/1.25 var(--display)}
+.fs-s{flex:1;text-align:right;font-size:calc(12.5px * var(--ts));color:var(--muted)}
+.fold-sec .chev{font-size:20px;line-height:1;color:var(--muted);transition:transform .2s}
+.fold-sec[open]>summary .chev{transform:rotate(90deg)}
+.fs-b{padding:0 var(--pad) var(--pad)}
+.fold-sec .strat{background:none;border:0;padding:0;margin:0}
+.ideas-sec .idea{background:var(--paper)}
+.themes{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.theme{display:inline-flex;align-items:center;gap:2px;background:var(--signal-wash);color:var(--signal);border-radius:16px;padding:4px 4px 4px 11px;font-weight:600;font-size:calc(13.5px * var(--ts))}
+.theme button{width:24px;height:24px;border-radius:12px;font-size:16px;line-height:1;color:var(--signal)}
+.theme-add{display:flex;gap:8px;align-items:center}
+.theme-add .cfgin{flex:1;font:16px var(--sans);padding:8px 10px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
+.idea-open{text-align:left}
+.idea-open .chev{color:var(--signal);font-weight:700}
+.idea-t{margin-top:10px}
+.idea .rangebox{margin-top:8px}
 /* My strategies */
 .strat{background:var(--sheet);border:1px solid var(--rule);border-left:4px solid var(--amber);border-radius:12px;padding:var(--pad);margin:10px 0 16px}
 .strat-c{border-top:1px solid var(--rule);padding:10px 0 4px}

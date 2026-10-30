@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.6.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.7.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -109,7 +109,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 💼 **Portfolio and watchlist** | Two tabs: stocks you own, with shares and average price, and stocks you watch. Each row shows the price, today's change, a one-month trend line and Stockit's view. Sort by value, today's move, signal or A–Z. |
 | 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings, all in **one currency you choose** (euros, dollars, pounds and more), whichever markets your stocks trade on. |
 | 📊 **A page per stock** | 1D, 1W, 1M, 6M, 1Y and 5Y chart you can touch to see the price at any moment, whether its market is open, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
-| 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
+| 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 50- and 200-day averages, RSI, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
 | 🕒 **Markets** | Every stock shows whether its market is open right now. The Markets tab lists the markets where your stocks trade, then 16 others, each with a countdown to its next open or close, its hours in local and your time, and the trading day's progress. |
 | 🧭 **My strategies** | Write down your own plans in Ideas, such as "when Nike recovers, sell it and buy a pharma company", with an optional timing. ✦ Ideas serve them and say where each one stands; the briefing and stories take them into account. Retire a strategy when it's done. |
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
@@ -119,7 +119,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. |
 | ✦ **A story per stock** | What the company does, what's happening now and why, whether the price looks cheap or expensive, why buy, what could go wrong and what to watch, with numbered links to its sources. |
-| ✦ **Ideas** | New stocks worth a closer look, picked for your investing style (Cautious, Balanced or Adventurous) and your own themes, from what's trending and from good-value lists. One tap adds an idea to the watchlist. |
+| ✦ **Ideas** | New stocks worth a closer look, picked for your investing style, your strategies and your themes, from what's trending and from good-value lists. Each comes with its key numbers and technicals (P/E, dividend yield, market cap, 50- and 200-day averages, RSI and more); tap one to open its full stock page before you add it. |
 | 📥 **Bring them in fast** | Search by name or ticker, paste a list (`AAPL 10 @ 150`, `MSFT, NVDA`), open a broker CSV export, or ✦ read the tickers from a screenshot. |
 | 🎨 **Make it yours** | Six colour themes plus Auto (follows light and dark mode), Comfortable, Compact or Tiny layouts, four text sizes, sans or serif headlines. |
 | 🎬 **Launch screen** | Stockit opens on its logo for 2.4 seconds: the price line draws itself, then "Track. Read. Decide." Tap to skip; with Reduce Motion it appears without movement. It is the shared [launch-screen](https://github.com/gadominas/app-blueprints/blob/main/blueprints/launch-screen.md) blueprint, so all the apps start the same way. |
@@ -161,6 +161,18 @@ The **Markets** tab shows the markets where your stocks trade first, then the ot
 - Which of your stocks trade there, with today's move (tap one to open it).
 
 Hours follow each exchange's own time zone, so summer and winter time are right everywhere. For markets where you hold stocks, Yahoo's session times also catch public holidays.
+
+<br clear="right">
+
+## Ideas you can judge
+
+<img src="docs/screenshots/24-idea-numbers.png" width="250" align="right" alt="An idea's numbers: P/E, dividend yield, market cap, moving averages, RSI, analyst target, range and performance">
+
+The **Ideas** tab has three sections that fold open and closed (Stockit remembers which you folded): **My strategies**, **Themes you like** and **✦ Stocks worth a closer look**.
+
+- **Themes you like** are right in the tab: tap **×** to remove one, type a new one and tap **Add**. ✦ Ideas look for stocks that fit them, together with your strategies.
+- **Every idea comes with the numbers to judge it**: P/E and forward P/E, dividend yield, market cap, the 50-day and 200-day moving averages (and how far the price is from each), RSI over 14 days, beta, the analysts' target and rating, profit margin and revenue growth, plus its sector, exchange, 52-week range, 1, 6 and 12-month performance and price trend. Tap any number to see what it means.
+- **Tap an idea** (its ticker or **See everything**) to open its full stock page, exactly as for a stock on your lists: charts from 1D to 5Y, numbers, headlines with TL;DRs, the ✦ story and whether its market is open. Then **Add to watchlist** or **I own this**, or just close it.
 
 <br clear="right">
 
@@ -278,6 +290,8 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |
+| Change the themes for ideas | **Ideas › Themes you like** |
 | Add your own plan | **Ideas › My strategies**, write it, add a timing if you like, tap **Add strategy** |
 | Put a plan aside | **Retire** on the strategy; bring it back from **Retired strategies** |
 | Scan the news | Open **Flash** |
