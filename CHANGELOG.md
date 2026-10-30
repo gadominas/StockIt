@@ -2,6 +2,23 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.3.0 (2026-10-30): Hear the whole story
+
+- 🎧 **Listen to a stock's news**: Its top three articles are read in full and told as one story, then what it could mean.
+- 📰 **Fuller TL;DRs**: Every ✦ TL;DR now tells the story in a few paragraphs, with the key facts and figures.
+- 🔗 **More articles readable**: Google News links now lead to the publisher's article, so far fewer TL;DRs stop at the headline.
+
+**Changes**
+
+- Listen on each Flash card: Stockit reads that stock's top articles in full and ✦ AI tells them as one spoken story of 250 to 400 words, naming its sources, then what it could mean for the stock
+- Listen at the top of Flash plays the story of every open card in turn; the player starts at once and the next story is prepared while one is playing
+- Without an AI key, Listen reads each article's key sentences in turn instead of just its headline
+- ✦ TL;DRs now include the story in two or three paragraphs and 4 to 6 key facts, and Listen reads the story too; up to 12,000 characters of the article are sent (Settings › AI limits)
+- Google News links are resolved to the publisher's own article before reading
+- Articles are kept in memory while Stockit is open, so a TL;DR and a story about the same headlines load each page once
+- Stories and TL;DRs written without AI are rewritten with AI once you add a key
+- Token usage counts News stories to listen to separately
+
 ## 1.2.0 (2026-10-30): Flash, at a glance
 
 - 💼 **Your stake beside the news**: Each Flash card now shows your shares, today's profit or loss and Stockit's view.

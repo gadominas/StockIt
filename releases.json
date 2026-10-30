@@ -4,6 +4,38 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.3.0",
+      "date": "2026-10-30",
+      "title": "Hear the whole story",
+      "highlights": [
+        {
+          "icon": "🎧",
+          "title": "Listen to a stock's news",
+          "text": "Its top three articles are read in full and told as one story, then what it could mean."
+        },
+        {
+          "icon": "📰",
+          "title": "Fuller TL;DRs",
+          "text": "Every ✦ TL;DR now tells the story in a few paragraphs, with the key facts and figures."
+        },
+        {
+          "icon": "🔗",
+          "title": "More articles readable",
+          "text": "Google News links now lead to the publisher's article, so far fewer TL;DRs stop at the headline."
+        }
+      ],
+      "changes": [
+        "Listen on each Flash card: Stockit reads that stock's top articles in full and ✦ AI tells them as one spoken story of 250 to 400 words, naming its sources, then what it could mean for the stock",
+        "Listen at the top of Flash plays the story of every open card in turn; the player starts at once and the next story is prepared while one is playing",
+        "Without an AI key, Listen reads each article's key sentences in turn instead of just its headline",
+        "✦ TL;DRs now include the story in two or three paragraphs and 4 to 6 key facts, and Listen reads the story too; up to 12,000 characters of the article are sent (Settings › AI limits)",
+        "Google News links are resolved to the publisher's own article before reading",
+        "Articles are kept in memory while Stockit is open, so a TL;DR and a story about the same headlines load each page once",
+        "Stories and TL;DRs written without AI are rewritten with AI once you add a key",
+        "Token usage counts News stories to listen to separately"
+      ]
+    },
+    {
       "version": "1.2.0",
       "date": "2026-10-30",
       "title": "Flash, at a glance",
