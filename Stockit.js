@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.12.0';
+const VERSION = '1.13.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -46,6 +46,7 @@ const BLUEPRINTS = [
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
+  { id: 'ai-invitation', name: 'AI invitation', version: '1.0.1', since: '1.13.0' },
 ];
 
 // ---------- config ----------
@@ -1493,6 +1494,43 @@ const call = (fn, ...args) => wv ? wv.evaluateJavaScript(`window.${fn} && window
 const toast = msg => call("toast", msg);
 const push = () => call("recv", clientState());
 
+// ───────── AI invitation (app-blueprints · ai-invitation) ─────────
+// What the invitation promises. Exactly three perks, each a real feature that needs a key.
+const AI_INVITE = {
+  title: "Give Stockit superpowers",            // punchy, names the app, at most 32 characters
+  perks: [                                      // icon + at most 48 characters each
+    { icon: "✦", text: "A daily briefing on your portfolio" },
+    { icon: "💡", text: "Stock ideas that fit your strategies" },
+    { icon: "📖", text: "Each stock's story and a buy, hold or sell view" },
+  ],
+};
+
+// When it may appear. Its state lives in settings.json as settings.aiInvite (no UI of its own).
+const INVITE_DAY = 864e5;
+const INVITE_GAP = 3;          // days between invitations (about twice a week)
+const INVITE_GAP_SLOW = 7;     // days between invitations after the 4th "Later"
+function aiInviteDue(now = Date.now()) {
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  if (aiKey()) { if (!s.keyed) { s.keyed = true; saveAll(); } return false; }   // has a key, or had one: never again
+  if (!s.first) { s.first = now; saveAll(); return false; }   // first launch: let the app speak for itself first
+  if (s.off || s.keyed) return false;
+  if (now - s.first < INVITE_DAY) return false;
+  return now >= (s.next || 0);
+}
+// The page reports what happened: "shown", "open", "later" or "never".
+function aiInviteNote(what, now = Date.now()) {
+  const s = settings.aiInvite || (settings.aiInvite = {});
+  if (what === "shown") { s.shown = (s.shown || 0) + 1; s.next = now + INVITE_GAP * INVITE_DAY; }
+  else if (what === "later") { s.later = (s.later || 0) + 1; s.next = now + (s.later >= 4 ? INVITE_GAP_SLOW : INVITE_GAP) * INVITE_DAY; }
+  else if (what === "never") s.off = true;
+  else return;   // "open": the AI sheet takes over; "shown" already set the next date
+  saveAll();
+}
+// One offer per launch, and an update wins: call this once the update check has settled.
+function inviteIfDue() {
+  if (!pendingUpdate && aiInviteDue()) call("__aiInvite", AI_INVITE);   // call() is Stockit's js(): window.__aiInvite(AI_INVITE)
+}
+
 // Shares and average price, in a native prompt (decimal keypad).
 async function editHolding(x) {
   const m = market[x.s] || {};
@@ -1699,9 +1737,11 @@ async function handle(m) {
     case "openurl":   // Settings › Built with: only the blueprints repository opens from here
       if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
       return;
+    case "aiinvite": aiInviteNote(m.v); return;   // AI invitation: shown, open, later or never
     case "aikey": {
       const p = PROVIDERS[m.v] ? m.v : settings.aiProvider;
       if (await askKey(p)) {
+        settings.aiInvite = Object.assign(settings.aiInvite || {}, { keyed: true });   // AI invitation: a key ends it for good
         settings.ai = true; saveAll(); push();
         try { const n = await fetchModels(p); toast(`${PROVIDERS[p]} key saved — ${n} models available`); }
         catch (e) { toast(`Key saved, but checking it failed: ${String(e.message || e).slice(0, 70)}`); }
@@ -1798,6 +1838,54 @@ function clientApp() {
     q.push(m); if (!flushing) flush();
   }
   window.__done = (req, ok, msg) => { const cb = pending[req]; delete pending[req]; if (cb) cb(ok, msg); };
+
+  // ── AI invitation (app-blueprints · ai-invitation) ── ES5, no backticks: this sits inside the page's template string.
+  window.__aiInvite = function (c) {
+    var tries = 0;
+    (function wait() {
+      // Never over the launch screen, another sheet, or a task the app says can't be interrupted.
+      var busy = document.querySelector("#splash:not(.gone)") || document.getElementById("upd") || document.getElementById("aiinv") ||
+        document.querySelector(".sheet.open, #cfgsheet.open, #aisheet.open") || (window.canInvite && !window.canInvite());
+      if (busy) { if (++tries < 40) setTimeout(wait, 500); return; }   // gives up after 20 s; it comes back another day
+      setTimeout(function () { if (!document.getElementById("aiinv")) showInvite(c); }, 600);
+    })();
+  };
+  function escI(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
+  function showInvite(c) {
+    var el = document.createElement("div");
+    el.id = "aiinv";
+    el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-labelledby", "aiinv-t");
+    el.innerHTML = '<div class="aiinv-card">' +
+      '<div class="aiinv-spark" aria-hidden="true">✦</div>' +
+      '<h2 id="aiinv-t">' + escI(c.title) + '</h2>' +
+      '<p class="aiinv-lead">Add an AI key and these switch on:</p>' +
+      '<ul class="aiinv-perks">' + c.perks.slice(0, 3).map(function (p, i) {
+        return '<li style="--i:' + i + '"><span class="aiinv-ico" aria-hidden="true">' + escI(p.icon) + '</span>' + escI(p.text) + '</li>';
+      }).join("") + '</ul>' +
+      '<ol class="aiinv-steps"><li>Get a key from Claude or OpenAI</li><li>Paste it in AI settings</li><li>That’s it: these turn on at once</li></ol>' +
+      '<button class="aiinv-go" data-inv="open">Turn on AI</button>' +
+      '<div class="aiinv-row"><button class="aiinv-later" data-inv="later">Later</button>' +
+      '<button class="aiinv-never" data-inv="never">Don’t remind me again</button></div></div>';
+    el.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-inv]") : null;
+      if (!b && e.target !== el) return;      // taps inside the card do nothing
+      closeInvite(b ? b.dataset.inv : "later");   // a tap on the dimmed backdrop counts as Later
+    });
+    document.body.appendChild(el);
+    send("aiinvite", { v: "shown" });
+    var go = el.querySelector(".aiinv-go"); if (go && go.focus) go.focus();
+  }
+  function closeInvite(what) {
+    var el = document.getElementById("aiinv"); if (!el || el.classList.contains("out")) return;
+    el.classList.add("out");
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
+    send("aiinvite", { v: what });
+    if (what === "open") setTimeout(function () {
+      window.__aiOpen();   // the same thing the Settings row's "aiopen" action does
+      var add = document.querySelector('#aisheet [data-act="aikey"]');   // the provider in use comes first
+      if (add) { add.classList.add("aiinv-nudge"); if (add.scrollIntoView) add.scrollIntoView({ block: "center" }); setTimeout(function () { add.classList.remove("aiinv-nudge"); }, 2600); }
+    }, 280);
+  }
   function flush() {
     const m = q.shift();
     if (!m) { flushing = false; return; }
@@ -1890,6 +1978,9 @@ function clientApp() {
   // Privacy mode (the eye in the header): your own amounts become •••• so the app can be shown to someone.
   // Market prices and percentages stay; amounts written by AI or in your strategies are masked too.
   const priv = () => !!S.settings.privacy;
+  // AI invitation hooks: open AI settings as the Settings row does; never interrupt a demo (privacy on) or Listen
+  window.__aiOpen = function () { aiOpen = true; renderAI(); };
+  window.canInvite = function () { return !priv() && !tts.on; };
   const P = h => priv() ? `<span class="pv" title="Hidden">••••</span>` : h;
   const MONEY_RX = /(?:US\$|[$€£¥]|\b(?:USD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|JPY|CAD|AUD|HKD)\s?)\s?\d[\d,.\u00a0 ]*\d(?:\s?(?:[kKmMbB]n?|million|billion|thousand)\b)?|\b\d[\d,.\u00a0]*\d?\s?(?:USD|EUR|GBP|CHF|SEK|NOK|DKK|PLN|JPY|CAD|AUD|HKD|euros?|dollars?|pounds?)\b|\b\d[\d,.]*\s?(?:shares|units)\b/gi;
   const mask = t => priv() ? String(t == null ? "" : t).replace(MONEY_RX, "••••") : t;
@@ -3480,6 +3571,36 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 
 /* update sheet (app-blueprints · in-app-updates) */
 #upd{position:fixed;inset:0;z-index:48;background:rgba(0,0,0,.55);display:flex;align-items:flex-end}
+/* AI invitation (app-blueprints · ai-invitation): above Settings and the AI sheet, below the update sheet and the launch screen */
+#aiinv{position:fixed;inset:0;z-index:47;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,.45);animation:aiinvFade .25s ease both}
+#aiinv.out{animation:aiinvFadeOut .24s ease both}
+.aiinv-card{position:relative;width:100%;max-width:380px;background:var(--sheet);color:var(--ink);border:1px solid var(--rule);border-radius:24px;padding:26px 22px 16px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.35);animation:aiinvUp .5s cubic-bezier(.2,.9,.3,1.2) both}
+#aiinv.out .aiinv-card{animation:aiinvDown .24s ease both}
+.aiinv-spark{width:56px;height:56px;margin:-4px auto 10px;border-radius:18px;display:grid;place-items:center;font-size:calc(30px * var(--ts));color:var(--signal);background:var(--signal-wash);animation:aiinvTwinkle 2.4s ease-in-out .5s infinite}
+#aiinv h2{margin:0 0 6px;font-family:var(--display);font-size:calc(23px * var(--ts));line-height:1.2;font-weight:800}
+.aiinv-lead{margin:0 0 14px;color:var(--ink-2);font-size:calc(15px * var(--ts))}
+.aiinv-perks{list-style:none;margin:0 0 14px;padding:0;text-align:left}
+.aiinv-perks li{display:flex;gap:10px;align-items:center;padding:9px 12px;margin-bottom:6px;border-radius:12px;background:var(--signal-wash);font-size:calc(15px * var(--ts));font-weight:600;animation:aiinvPerk .4s ease both;animation-delay:calc(.25s + var(--i) * .09s)}
+.aiinv-ico{flex:none;width:22px;text-align:center}
+.aiinv-steps{margin:0 0 16px;padding-left:22px;text-align:left;color:var(--muted);font-size:calc(13px * var(--ts));line-height:1.6}
+.aiinv-go{display:block;width:100%;border:0;border-radius:14px;padding:14px;font:700 calc(17px * var(--ts)) var(--display);color:var(--sheet);background:var(--signal);animation:aiinvGlow 1.6s ease-in-out .9s 2}
+.aiinv-go:focus{outline:none}
+.aiinv-go:focus-visible{box-shadow:0 0 0 4px var(--signal-wash)}
+.aiinv-row{display:flex;justify-content:space-between;gap:8px;margin-top:6px}
+.aiinv-later,.aiinv-never{border:0;background:none;padding:12px 6px;color:var(--muted);font:600 calc(14px * var(--ts)) var(--sans, inherit)}
+.aiinv-later{color:var(--ink-2)}
+.aiinv-nudge{animation:aiinvGlow 1.2s ease-in-out 2}
+@keyframes aiinvFade{from{opacity:0}to{opacity:1}}
+@keyframes aiinvFadeOut{from{opacity:1}to{opacity:0}}
+@keyframes aiinvUp{from{opacity:0;transform:translateY(40px) scale(.94)}to{opacity:1;transform:none}}
+@keyframes aiinvDown{to{opacity:0;transform:translateY(24px) scale(.97)}}
+@keyframes aiinvPerk{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+@keyframes aiinvTwinkle{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.12) rotate(12deg)}}
+@keyframes aiinvGlow{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--signal-wash)}}
+@media (prefers-reduced-motion:reduce){
+  #aiinv,#aiinv.out,.aiinv-card,#aiinv.out .aiinv-card,.aiinv-perks li,.aiinv-spark,.aiinv-go,.aiinv-nudge{animation:none}
+  #aiinv.out{opacity:0;transition:opacity .2s}
+}
 .updp{width:100%;background:var(--sheet);border-radius:22px 22px 0 0;padding:20px 18px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
 .updtag{align-self:flex-start;background:var(--signal);color:var(--paper);font-size:calc(12px * var(--ts));font-weight:800;padding:4px 10px;border-radius:999px}
 .updt{margin:6px 0 0;font:700 calc(22px * var(--ts))/1.2 var(--display)}
@@ -4169,7 +4290,7 @@ async function bootApp(isClosed) {
   Timer.schedule(3500, false, () => {
     if (isClosed() || updateChecked) return;
     updateChecked = true;
-    checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); });
+    checkForUpdate().then(u => { pendingUpdate = u; offerUpdate(); }).catch(() => {}).then(inviteIfDue);   // AI invitation: after the update check, never with an offer
   });
   Timer.schedule(6000, false, () => { widgetIcon(); });
 }

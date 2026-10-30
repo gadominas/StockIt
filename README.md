@@ -51,6 +51,7 @@ That's it. From now on Stockit tells you when a new version is out and updates i
 **Three optional extras, each takes a minute:**
 
 - **Add AI:** open **Settings › AI settings**, tap **Add key**, and paste a [Claude](https://console.anthropic.com/settings/keys) or [OpenAI](https://platform.openai.com/api-keys) API key. This switches on the daily briefing, a story and a view per stock, ideas and screenshot import.
+- **The AI invitation:** without a key, Stockit now and then shows a short card with what AI adds (the ✦ briefing, ideas and stock stories) and a **Turn on AI** button that opens AI settings. At most every 3 days, never during a demo (privacy on) or Listen; **Don't remind me again** ends it.
 - **Add the widget:** see [Home-screen widget](#home-screen-widget).
 - **Put Stockit on your Home Screen:** make a Shortcut with **Run Script › Stockit**, add it to the Home Screen, and use [`docs/icon-1024.png`](docs/icon-1024.png) as its icon.
 
