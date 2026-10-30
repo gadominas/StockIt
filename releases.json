@@ -4,6 +4,39 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.10.0",
+      "date": "2026-10-30",
+      "title": "Strategies, suggested and yours",
+      "highlights": [
+        {
+          "icon": "✦",
+          "title": "Suggested strategies",
+          "text": "Fresh plans for your portfolio and watchlist, drawn from your strategies and today's prices."
+        },
+        {
+          "icon": "✏️",
+          "title": "Keep, edit, refine",
+          "text": "Keep a suggestion as is or edit it first; every strategy of yours can be changed any time."
+        },
+        {
+          "icon": "⏱",
+          "title": "Never stale",
+          "text": "Suggestions and Where it stands refresh every day, or every 6 h, 12 h or 2 days, as you choose."
+        }
+      ],
+      "changes": [
+        "Ideas › My strategies › ✦ Suggested for you: 3 new strategies (1 to 5 in Settings › Strategy suggestions), written in the first person with a timing, the numbers behind them and the tickers involved (tap one to open it)",
+        "Keep a suggestion as it is, Edit, then keep, or Dismiss it; kept ones are marked From a ✦ suggestion",
+        "Every strategy has Edit: change its words and timing any time; edited ones show when they were changed",
+        "Suggestions refresh on their own when they're older than you chose (every day by default; 6 h, 12 h, 2 days or only when you tap Refresh), when Stockit opens, after a refresh or when you open Ideas, so prices and exchange rates are current",
+        "Each refresh also updates Where it stands for your own strategies, with when it was written",
+        "AI settings › What AI does: a switch for Suggested strategies; token usage counts Strategy suggestions"
+      ],
+      "fixes": [
+        "The price-trend line under an idea's performance no longer sits against the box above it"
+      ]
+    },
+    {
       "version": "1.9.0",
       "date": "2026-10-30",
       "title": "A clearer portfolio check",

@@ -2,6 +2,25 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.10.0 (2026-10-30): Strategies, suggested and yours
+
+- ✦ **Suggested strategies**: Fresh plans for your portfolio and watchlist, drawn from your strategies and today's prices.
+- ✏️ **Keep, edit, refine**: Keep a suggestion as is or edit it first; every strategy of yours can be changed any time.
+- ⏱ **Never stale**: Suggestions and Where it stands refresh every day, or every 6 h, 12 h or 2 days, as you choose.
+
+**Changes**
+
+- Ideas › My strategies › ✦ Suggested for you: 3 new strategies (1 to 5 in Settings › Strategy suggestions), written in the first person with a timing, the numbers behind them and the tickers involved (tap one to open it)
+- Keep a suggestion as it is, Edit, then keep, or Dismiss it; kept ones are marked From a ✦ suggestion
+- Every strategy has Edit: change its words and timing any time; edited ones show when they were changed
+- Suggestions refresh on their own when they're older than you chose (every day by default; 6 h, 12 h, 2 days or only when you tap Refresh), when Stockit opens, after a refresh or when you open Ideas, so prices and exchange rates are current
+- Each refresh also updates Where it stands for your own strategies, with when it was written
+- AI settings › What AI does: a switch for Suggested strategies; token usage counts Strategy suggestions
+
+**Fixes**
+
+- The price-trend line under an idea's performance no longer sits against the box above it
+
 ## 1.9.0 (2026-10-30): A clearer portfolio check
 
 - 🛡 **Always one tap away**: A ✓ icon on your portfolio opens the check; on your first launches a big button shows the way.
