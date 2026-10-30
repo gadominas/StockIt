@@ -2,6 +2,21 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.4.0 (2026-10-30): Tap a stock, hear its news
+
+- 👆 **Tap a stock to listen**: Tap any stock in Flash and its news starts playing; tap again to pause.
+- 📰 **Three articles, read in full**: Stockit reads three full articles per stock, skipping ones it can't open, and tells a 350–550 word story.
+- 👀 **See what you heard**: The story appears under the card, with which articles were read in full.
+
+**Changes**
+
+- Tap a stock's name in Flash to hear the story of its news; tap it again to pause or resume. The speaker beside the ticker shows when it's preparing or playing; Details › opens the stock's page
+- Stockit now reads three full articles for each story: when an article can't be opened (paywall, blocked page), it reads the next headline instead, from up to eight
+- ✦ Stories go through each article's facts, numbers, names and reasons in 350 to 550 words; a story that comes back too short is asked for again
+- The story you heard appears under the card, with its sources, how many words of each were read, and which were headline only
+- Yahoo's cookie-consent page in Europe is answered once (as "Accept all") and its cookies kept, so Yahoo articles can be read
+- Other recent headlines are given to the AI as context for the story
+
 ## 1.3.0 (2026-10-30): Hear the whole story
 
 - 🎧 **Listen to a stock's news**: Its top three articles are read in full and told as one story, then what it could mean.
