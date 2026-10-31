@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.16.0';
+const VERSION = '1.17.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -57,6 +57,7 @@ const BLUEPRINTS = [
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.0.0', since: '1.17.0' },
 ];
 
 // ---------- config ----------
@@ -1751,7 +1752,7 @@ async function handle(m) {
       else { track("usage_test"); const r = await flushUsage(); ok = !!(r && r.ok); msg = usageStatus() || "Nothing was sent."; }
       return call("__done", m.req, ok, msg);
     }
-    case "usage-listen": track("listened", { kind: ["brief", "story", "flash", "stock", "summary"].includes(m.kind) ? m.kind : "other", voice: settings.speechEngine === "ai" ? "ai" : "iphone" }); return;
+    case "usage-listen": track("listened", { kind: ["brief", "story", "flash", "stock", "summary", "article"].includes(m.kind) ? m.kind : "other", voice: settings.speechEngine === "ai" ? "ai" : "iphone" }); return;
     case "story": return runStory(m.s);
     case "briefing": return runBriefing(true);
     case "ideas": return runIdeas();
@@ -1792,6 +1793,13 @@ async function handle(m) {
       try { tldrs[id] = await makeDigest(m.s, links); pruneTldrs(); write("tldrs", tldrs); }
       catch (e) { return call("onDigest", m.id, { error: String(e.message || e) }); }
       return call("onDigest", m.id, tldrs[id]);
+    }
+    case "articletext": {   // read aloud: the article's own text, for a headline in Stockit's news (never any other address)
+      const n = ((market[m.s] || {}).news || []).find(h => h.l === m.l);
+      if (!n) return call("onArticleText", m.id, { error: "This headline is no longer in the list. Refresh and try again" });
+      const r = await readArticle(n), excerpt = (r.art && r.art.desc) || "";
+      const res = r.usable ? { paras: r.art.paras.slice(0, 80) } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
+      return call("onArticleText", m.id, res);
     }
     case "ttsaudio":   // one piece of ✦ AI speech, returned to the page as base64 MP3
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
@@ -2425,13 +2433,13 @@ function clientApp() {
       <div class="sigcount">${["buy", "hold", "sell"].filter(k => n[k]).map(k => `<span class="chip sig-${k}">${n[k]} ${k}</span>`).join("")}</div></section>`;
     return `<section class="brief mood-${esc(b.mood)}">
       <button class="brief-h brief-fold" data-act="brieffold" aria-expanded="${folded ? "false" : "true"}"><span class="badge-ai">✦ AI briefing by ${PN[b.by] || esc(b.by)}</span><span class="note">${rel(b.at)}</span><span class="chev" aria-hidden="true">›</span></button>
-      <h2 class="brief-t">${esc(mask(b.headline))}</h2>
-      <div class="brief-s">${(briefFull ? ps : ps.slice(0, 1)).join("")}</div>
+      <h2 class="brief-t">${inPlace("brief", "headline", esc(mask(b.headline)))}</h2>
+      <div class="brief-s">${(briefFull ? parasIn("brief", "bs", ps) : parasIn("brief", "bs", ps).slice(0, 1)).join("")}</div>
       ${ps.length > 1 ? `<button class="link small" data-act="brieffull">${briefFull ? "Show less" : "Read the full briefing"}</button>` : ""}
-      ${briefFull && (b.watch || []).length ? `<h3 class="mini">Keep an eye on</h3><ul class="dots">${b.watch.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+      ${briefFull && (b.watch || []).length ? `<h3 class="mini">Keep an eye on</h3><ul class="dots">${b.watch.map((w, i) => `<li>${inPlace("brief", "bw" + i, esc(w))}</li>`).join("")}</ul>` : ""}
       <div class="sigcount">${["buy", "hold", "sell"].filter(k => n[k]).map(k => `<span class="chip sig-${k}">${n[k]} ${k}</span>`).join("")}</div>
       <p class="note">${b.stale ? "Your stocks changed since this was written. " : ""}Opinions from the news and numbers, not financial advice.</p>
-      <div class="aic-btns"><button class="sm" data-act="listenbrief">${SPK}Listen</button><button class="sm" data-act="share-brief">Share</button><button class="sm" data-act="briefing" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div>
+      <div class="aic-btns"><button class="sm" data-act="listenbrief">${SPK}Listen to the briefing</button><button class="sm" data-act="share-brief">Share</button><button class="sm" data-act="briefing" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div>
     </section>`;
   }
 
@@ -2603,12 +2611,12 @@ function clientApp() {
     const st = x.story, bz = isBusy("story:" + x.s);
     if (!st) return `<section class="story"><h3 class="sec">The story</h3><p class="muted">What the company does, what's happening now and why, and whether the price looks cheap or expensive, from the latest headlines.</p>
       <div class="aic-btns"><button class="primary" data-act="story" data-v="${esc(x.s)}" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Write the story"}</button></div></section>`;
-    const list = (t, a) => a && a.length ? `<h3 class="mini">${t}</h3><ul class="dots">${a.map(i => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
+    const sid = "story-" + x.s, list = (t, a, pre) => a && a.length ? `<h3 class="mini">${t}</h3><ul class="dots">${a.map((i, n) => `<li>${inPlace(sid, pre + n, esc(i))}</li>`).join("")}</ul>` : "";
     return `<section class="story"><h3 class="sec">The story</h3><span class="badge-ai">✦ AI story by ${PN[st.by] || esc(st.by)}</span>
-      <h2 class="story-t">${esc(st.headline)}</h2>${paras(st.story, st.news).join("")}
-      ${list("Why " + st.signal, st.reasons)}${list("What could go wrong", st.risks)}${list("What to watch", st.watch)}
+      <h2 class="story-t">${inPlace(sid, "headline", esc(st.headline))}</h2>${parasIn(sid, "ss", paras(st.story, st.news)).join("")}
+      ${list("Why " + st.signal, st.reasons, "sr")}${list("What could go wrong", st.risks, "sk")}${list("What to watch", st.watch, "sw")}
       <p class="note">Written ${rel(st.at)}. Not financial advice.</p>
-      <div class="aic-btns"><button class="sm" data-act="listenstory" data-v="${esc(x.s)}">${SPK}Listen</button><button class="sm" data-act="share-story" data-v="${esc(x.s)}">Share</button>
+      <div class="aic-btns"><button class="sm" data-act="listenstory" data-v="${esc(x.s)}">${SPK}Listen to the story</button><button class="sm" data-act="share-story" data-v="${esc(x.s)}">Share</button>
         <button class="sm" data-act="story" data-v="${esc(x.s)}" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div></section>`;
   }
   function numbersHTML(x) {
@@ -2869,7 +2877,7 @@ function clientApp() {
     const n = S.cfg.flashPerStock || 3, list = flashOrder(), folded = list.filter(isFolded).length;
     return `<div class="listbar"><span>${folded ? `Top ${n} per stock · ${folded} read` : `Top ${n} headline${n === 1 ? "" : "s"} per stock`}</span><div class="lb-a">
         ${folded ? `<button class="sm" data-act="unfoldall">Open all</button>` : list.length > 1 ? `<button class="sm" data-act="foldall">Fold all</button>` : ""}
-        <button class="sm" data-act="listenflash">${SPK}Listen</button></div></div>
+        <button class="sm" data-act="listenflash">${SPK}Headlines</button></div></div>
       <div class="flash">${list.map(x => {
         const top = topNews(x), f = isFolded(x), isNew = fold()[x.s] != null && !f;
         const short = esc(String(x.name || "").replace(/,? (Inc\.?|Corporation|Corp\.?|N\.V\.|plc|Ltd\.?|Holdings?|Company|AG|SE|S\.E\.|S\.A\.)$/i, ""));
@@ -2877,7 +2885,7 @@ function clientApp() {
             <b>${esc(x.s)}</b><span class="pill ${cls(dayPct(x))}">${pct(dayPct(x))}</span>${x.sig ? sigChip(x.sig) : ""}
             <span class="fl-fs">${top.length} read · newest ${top.length ? rel(newest(x)) : "—"}</span><span class="chev" aria-hidden="true">›</span></button></article>`;
         const dk = dgKey(x), dd = dg[dk], busyS = !!dgWait[dk], on = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s;
-        return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="listenstock" data-v="${esc(x.s)}" aria-label="Listen to ${esc(x.s)} news">
+        return `<article class="fl" id="c-fl-${esc(x.s)}"><div class="fl-l"><button class="fl-s" data-act="listenstock" data-v="${esc(x.s)}" aria-label="Listen to ${esc(x.s)} headlines">
             <b>${esc(x.s)} <span class="fl-spk ${busyS ? "busy" : ""}">${busyS ? `<span class="busy-dot"></span>` : SPK}</span></b><small>${short}</small></button>${mkBadge(x)}${flashFacts(x)}
             <button class="fl-open" data-act="open" data-v="${esc(x.s)}">Details ›</button></div>
           <div class="fl-n">${isNew ? `<span class="fl-new">New since you folded it</span>` : ""}${top.length ? top.map(h => `<button class="fl-h" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(h.l)}"><b>${esc(h.t)}</b><small>${esc(h.p)} · ${rel(h.at)}</small></button>`).join("")
@@ -2905,11 +2913,11 @@ function clientApp() {
     else if (d.error) body = `<p class="err">${esc(d.error)}.</p><div class="aic-btns"><button class="sm" data-act="tldrretry">Try again</button></div>`;
     else body = `<div class="tli-top">${d.kind === "ai" ? `<span class="badge-ai">✦ AI summary by ${PN[d.by] || esc(d.by)}</span>` : `<span class="badge-ex">From the article — no AI</span>`}${d.mins ? `<span>${d.mins} min read</span>` : ""}</div>
       ${d.partial ? `<p class="note">The full article couldn't be read here, so this ${d.kind === "ai" ? "explains the headline and summary" : "is the article's own summary"}.</p>` : ""}${d.note ? `<p class="note">${esc(d.note)}</p>` : ""}
-      <p class="tl-lead">${esc(d.lead)}</p>
-      ${d.story ? `<div class="tl-story">${paras(d.story).join("")}</div><h3 class="mini">Key facts</h3>` : ""}
-      ${(d.points || []).length ? `<ul class="tl-pts">${d.points.map(p => `<li>${esc(p)}</li>`).join("")}</ul>` : ""}
-      ${d.why ? `<div class="tl-why"><b>What it could mean for ${esc(x.s)}</b><p>${esc(d.why)}</p></div>` : ""}
-      <div class="tl-listen"><button class="listen" data-act="listentldr">${SPK}Listen</button>${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry">✦ Summarise with AI</button>` : ""}</div>`;
+      <p class="tl-lead">${inPlace("news-" + h.l, "lead", esc(d.lead))}</p>
+      ${d.story ? `<div class="tl-story">${parasIn("news-" + h.l, "story", paras(d.story)).join("")}</div><h3 class="mini">Key facts</h3>` : ""}
+      ${(d.points || []).length ? `<ul class="tl-pts">${d.points.map((p, i) => `<li>${inPlace("news-" + h.l, "pt" + i, esc(p))}</li>`).join("")}</ul>` : ""}
+      ${d.why ? `<div class="tl-why"><b>What it could mean for ${esc(x.s)}</b><p>${inPlace("news-" + h.l, "why", esc(d.why))}</p></div>` : ""}
+      <div class="tl-listen"><button class="listen" data-act="listentldr">${SPK}Listen to TL;DR</button><button class="listen" data-act="listenarticle" aria-label="Listen to the full article">${SPK}Article</button>${d.kind !== "ai" && S.settings.hasKey ? `<button class="sm" data-act="tldrretry">✦ Summarise with AI</button>` : ""}</div>`;
     const more = (x.news || []).filter(n => n.l !== h.l).slice(0, 6);
     el.innerHTML = `<div class="sh-head"><h2>${esc(x.s)} <span class="pill ${cls(dp)}">${pct(dp)}</span></h2><button class="link" data-act="newsclose">Done</button></div><div class="sh-body tl">
       <p class="kicker">${esc(h.p)} · ${rel(h.at)}${h.src === "web" ? " · from the web" : ""}</p>
@@ -2922,25 +2930,10 @@ function clientApp() {
     </div>`;
     el.scrollTop = keep;
   }
-  const sentence = t => { t = clean(t); return t && !/[.!?]$/.test(t) ? t + "." : t; };
-  function tldrItems(x, h, d) {
-    return [{ title: h.t, text: [h.t, "From " + h.p, d.lead].concat(d.story ? [d.story.replace(/\s*\n+\s*/g, " ")] : d.points || []).concat(d.why ? ["What it could mean for " + (x.name || x.s) + ": " + d.why] : []).map(sentence).join(" ") }];
-  }
-  function briefItems(b) {
-    return [{ title: b.headline, text: sentence(b.headline) + " " + b.story }].concat((b.watch || []).length ? [{ title: "Keep an eye on", text: "Keep an eye on: " + b.watch.map(sentence).join(" ") }] : []);
-  }
-  function storyItems(x, st) {
-    const list = (t, a) => a && a.length ? [{ title: t, text: t + ". " + a.map(sentence).join(" ") }] : [];
-    return [{ title: st.headline, text: sentence(st.headline) + " " + st.story }]
-      .concat(list("Why " + st.signal, st.reasons), list("What could go wrong", st.risks), list("What to watch", st.watch));
-  }
-  function flashItems() {
-    return flashOrder().filter(x => !isFolded(x)).map(x => ({ id: "fl-" + x.s, title: x.s, text: topNews(x).length
-      ? sentence(x.name || x.s) + " " + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ")
-      : "" })).filter(it => it.text);
-  }
-
-  // ---- read aloud (as in BlogPulse): iPhone voices through the Web Speech API, or ✦ AI voices from OpenAI ----
+  // ---- read aloud (app-blueprints · read-aloud 1.0.0): the engine, player, highlighting, text view, Settings › Listening and
+  // tap handlers come from app-blueprints/snippets/read-aloud (names kept); Stockit's changes to them are marked "Stockit:".
+  // Uses Stockit's $, esc, send, S.settings, lockBody, cfgOpen, renderCfg, mask, and window.toast as toast.
+  const toast = m => window.toast(m);
   // ── Read aloud: system voices through the Web Speech API ──
   const SYN = window.speechSynthesis;
   const SPK = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg>`;
@@ -2957,28 +2950,55 @@ function clientApp() {
   const quality = v => /premium/i.test(v.name + v.voiceURI) ? "Premium" : /enhanced/i.test(v.name + v.voiceURI) ? "Enhanced" : "";
   const genderOf = v => GENDER[baseName(v)] || "";
   let voices = [];
-  function loadVoices() { voices = SYN ? SYN.getVoices().filter(v => !NOVELTY.test(v.name)) : []; if (cfgOpen) renderCfg(); }
+  function loadVoices() { voices = SYN ? SYN.getVoices().filter(v => !NOVELTY.test(v.name)) : []; if (cfgOpen) renderCfg(); }   // settings blueprint: re-render Settings if it is open
   if (SYN) { loadVoices(); SYN.addEventListener ? SYN.addEventListener("voiceschanged", loadVoices) : (SYN.onvoiceschanged = loadVoices); }
   function currentVoice() {
     if (!voices.length) return null;
     const saved = voices.find(v => v.voiceURI === S.settings.voiceURI);
     if (saved) return saved;
-    const en = voices.filter(v => /^en(-|_|$)/i.test(v.lang));   // headlines are mostly English
+    const en = voices.filter(v => /^en(-|_|$)/i.test(v.lang));   // posts are mostly English
     const rank = v => (quality(v) === "Premium" ? 3 : quality(v) === "Enhanced" ? 2 : 0) + (v.default ? 1 : 0) + (/en-(US|GB)/i.test(v.lang) ? 0.5 : 0);
     return (en.length ? en : voices).slice().sort((x, y) => rank(y) - rank(x))[0];
   }
   const langName = code => { try { return new Intl.DisplayNames([navigator.language || "en"], { type: "language" }).of(code) || code; } catch (e) { return code; } };
   const clean = t => String(t || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "").replace(/\*\*|__/g, "").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
-  function chunks(t) {   // short pieces: long utterances can stop early in WebKit
-    const out = [];
-    for (let sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
-      sen = sen.trim(); if (!sen) continue;
-      while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; out.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
-      if (out.length && out[out.length - 1].length + sen.length < 160) out[out.length - 1] += " " + sen; else out.push(sen);
-    }
-    return out;
+  // A reading is made of items (a post, a story section…), each made of paragraphs, each made of sentences.
+  // Sentences ("segments") are what the screen highlights; parts are what the voice speaks (sentences joined).
+  const sentences = t => (clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []).map(x => x.trim()).filter(Boolean);
+  function buildPlan(items, ai) {
+    const segs = [], parts = [];
+    let cur = null;
+    const push = (seg, k) => {
+      const room = ai ? (parts.length <= 1 ? 700 : 2000) : 160;   // AI: a short first piece so audio starts quickly
+      if (!cur || cur.k !== k || (ai ? cur.t.length + seg.say.length + 1 > room : cur.t.length + seg.say.length >= room)) {
+        cur = { t: "", k, segs: [] }; parts.push(cur);
+      }
+      seg.part = parts.length - 1; seg.l0 = cur.t ? cur.t.length + 1 : 0;
+      cur.t = cur.t ? cur.t + " " + seg.say : seg.say;
+      cur.segs.push(segs.length); segs.push(seg);
+    };
+    items.forEach((it, k) => (it.paras || [{ text: it.text }]).forEach((p, pi) => {
+      const sens = sentences(p.text);
+      sens.forEach((sen, si) => {
+        const pieces = [];
+        if (!ai) {   // WebKit can stop part-way through very long sentences: cut them at a comma or a space
+          while (sen.length > 220) { let cut = sen.lastIndexOf(", ", 220); if (cut < 80) cut = sen.lastIndexOf(" ", 220); if (cut < 40) cut = 220; pieces.push(sen.slice(0, cut + 1).trim()); sen = sen.slice(cut + 1).trim(); }
+        }
+        pieces.push(sen);
+        pieces.forEach((show, j) => {
+          const last = si === sens.length - 1 && j === pieces.length - 1;
+          const say = last && !/[.!?…:]["”’)]*$/.test(show) ? show + "." : show;   // a short pause after titles and bullets
+          push({ show, say, len: say.length, k, pi, key: p.key || "", head: !!p.head }, k);
+        });
+      });
+    }));
+    let acc = 0;
+    parts.forEach(pt => { pt.c0 = acc; acc += pt.t.length; });
+    segs.forEach(sg => { sg.a0 = parts[sg.part].c0 + sg.l0; sg.a1 = sg.a0 + sg.len; });
+    return { segs, parts, total: acc };
   }
-  const tts = { parts: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false };
+  const MODES = { article: "Full article", tldr: "TL;DR", story: "Story", summaries: "Summaries", test: "Voice test" };
+  const tts = { parts: [], segs: [], i: 0, label: "", items: [], token: 0, paused: false, on: false, timer: null, engine: "device", loading: false, kind: "", id: "", nowSeg: -1 };
   // AI voice: OpenAI speech, played through one <audio> element that a tap unlocks first
   const OAI_VOICES = [["alloy", "n"], ["ash", "m"], ["ballad", "m"], ["coral", "f"], ["echo", "m"], ["fable", "m"], ["nova", "f"], ["onyx", "m"], ["sage", "f"], ["shimmer", "f"], ["verse", "m"], ["marin", "f"], ["cedar", "m"]];
   const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
@@ -2992,15 +3012,6 @@ function clientApp() {
     let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
   })();
   function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
-  function aiChunks(t) {   // split at sentences: a short first piece so audio starts quickly, then up to ~2,000 characters
-    const out = []; let cur = "";
-    for (const sen of clean(t).match(/[^.!?…]+[.!?…]+["”’)]*\s*|[^.!?…]+$/g) || []) {
-      if (cur && (cur + sen).length > (out.length ? 2000 : 700)) { out.push(cur.trim()); cur = ""; }
-      cur += sen;
-    }
-    if (cur.trim()) out.push(cur.trim());
-    return out;
-  }
   function aiFetch(part) {
     if (part.audio) return Promise.resolve(part.audio);
     if (!part.pending) part.pending = new Promise((res, rej) => send("ttsaudio", { text: part.t }, (ok, msg) => ok ? res(part.audio = msg) : rej(msg)));
@@ -3008,54 +3019,213 @@ function clientApp() {
   }
   function aiPlayPart() {
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return waitOrStop();
+    if (!part) return waitOrStop();   // Stockit: a Flash reading may still be waiting for digests
     tts.loading = !part.audio; renderPlayer();
     aiFetch(part).then(b64 => {
       if (my !== tts.token) return;
       tts.loading = false;
       au.onended = () => { if (my !== tts.token) return; part.audio = null; tts.i++; aiPlayPart(); };
+      au.ontimeupdate = () => {
+        if (my !== tts.token || !au.duration || !isFinite(au.duration)) return;
+        tts.pos = Math.round(part.t.length * au.currentTime / au.duration);
+        tts.cps = part.t.length / au.duration;   // this voice's speed, for the time-left estimate
+        renderProgress();
+      };
+      tts.pos = 0;
       au.src = "data:audio/mpeg;base64," + b64;
       if (!tts.paused) {
         const pr = au.play();
-        if (pr && pr.catch) pr.catch(() => { if (my === tts.token) { tts.paused = true; renderPlayer(); window.toast("Tap play to start the AI voice"); } });
+        if (pr && pr.catch) pr.catch(() => { if (my === tts.token) { tts.paused = true; renderPlayer(); toast("Tap play to start the AI voice"); } });
       }
       renderPlayer();
       const nx = tts.parts[tts.i + 1]; if (nx) aiFetch(nx).catch(() => {});   // the next piece is ready before this one ends
     }).catch(err => {
       if (my !== tts.token) return;
       const rest = tts.items.slice(part.k), label = tts.label;
-      window.toast(`AI voice failed: ${String(err || "").slice(0, 70)}. Using the iPhone voice.`);
-      if (SYN && voices.length) speak(label, rest, "device"); else stopSpeaking();
+      toast(`AI voice failed: ${String(err || "").slice(0, 70)}. Using the iPhone voice.`);
+      if (SYN && voices.length) speak(label, rest, "device", tts.kind); else stopSpeaking();
     });
   }
   const playSoon = () => { clearTimeout(tts.timer); tts.timer = setTimeout(playPart, 60); };   // iOS needs a beat after cancel()
-  function speak(label, items, engine) {
+  function speak(label, items, engine, kind) {
     const ai = engine ? engine === "ai" : aiTTS();
     if (!ai && (!SYN || !voices.length)) {   // no Web Speech: hand the text to Scriptable's system voice
-      send("speak", { text: items.map(x => clean(x.text)).join(" ") });
-      return window.toast("Reading aloud with the system voice");
+      send("speak", { text: items.map(x => clean(x.text || (x.paras || []).map(p => p.text).join(". "))).join(" ") });
+      return toast("Reading aloud with the system voice");
     }
     stopSpeaking(true);
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
     tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
-    tts.parts = [];
-    items.forEach((it, k) => (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })));
+    tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
+    const plan = buildPlan(items, ai);
+    tts.parts = plan.parts; tts.segs = plan.segs; tts.total = plan.total; tts.pos = 0;
     if (!tts.parts.length) return stopSpeaking();
+    refreshReadingViews();   // wrap the text being read in highlightable sentences
     playSoon();
   }
   function playPart() {
     if (tts.engine === "ai") return aiPlayPart();
     const my = ++tts.token, part = tts.parts[tts.i];
-    if (!part) return waitOrStop();
+    if (!part) return waitOrStop();   // Stockit: a Flash reading may still be waiting for digests
     const u = new SpeechSynthesisUtterance(part.t), v = currentVoice();
     if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = Number(S.settings.voiceRate) || 1; u.pitch = Number(S.settings.voicePitch) || 1;
     const next = () => { if (my !== tts.token) return; tts.i++; playPart(); };
     u.onend = next; u.onerror = e => { if (e.error !== "interrupted" && e.error !== "canceled") next(); };
-    SYN.speak(u); renderPlayer();
+    u.onboundary = e => { if (my !== tts.token) return; tts.pos = e.charIndex || 0; renderProgress(); };
+    tts.pos = 0; SYN.speak(u); renderPlayer();
   }
-  // A queue the player starts on at once (inside the tap, so audio is allowed) and fills as stories arrive.
+  function stopSpeaking(quiet) {
+    tts.waiting = 0; tts.ses = 0;   // Stockit: ends a Flash queue too
+    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; clearTimeout(tts.timer);
+    au.onended = null; try { au.pause(); } catch (e) {}
+    if (SYN) SYN.cancel();
+    document.querySelectorAll(".rs-now,.rs-done").forEach(el => el.classList.remove("rs-now", "rs-done"));
+    tts.nowSeg = -1;
+    if (!quiet) { renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
+  }
+  function togglePause() {
+    if (!tts.on) return;
+    if (tts.engine === "ai") {
+      if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
+      else { tts.paused = true; au.pause(); }
+    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    renderPlayer();
+  }
+  function skipItem() {
+    if (!tts.on) return;
+    const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
+    if (j < 0) return waitOrStop();   // Stockit: wait for the next digest rather than stop
+    tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
+    tts.i = j; tts.paused = false; playSoon();
+  }
+  function renderProgress() {
+    if (!tts.on || !tts.total) return;
+    const part = tts.parts[tts.i] || { c0: tts.total };
+    const done = Math.min(tts.total, part.c0 + (tts.pos || 0)), pct = done / tts.total;
+    $("#plBar").style.width = (pct * 100).toFixed(1) + "%";
+    const cps = (tts.engine === "ai" ? tts.cps || 14 : 15 * (Number(S.settings.voiceRate) || 1));   // characters per second
+    const left = Math.round((tts.total - done) / cps / 60);
+    $("#plTime").textContent = `${Math.round(pct * 100)}% — ${left < 1 ? "less than a minute" : "about " + left + " min"} left`;
+    $("#plProg").setAttribute("aria-valuenow", String(Math.round(pct * 100)));
+    paintSegs(segAt(done));
+  }
+  function segAt(c) {   // the sentence containing character c (searching near the last one)
+    const sg = tts.segs; if (!sg.length) return -1;
+    let i = Math.max(0, Math.min(sg.length - 1, tts.nowSeg));
+    while (i > 0 && c < sg[i].a0) i--;
+    while (i < sg.length - 1 && c >= sg[i].a1) i++;
+    return i;
+  }
+  const segCls = i => !tts.on || tts.nowSeg < 0 ? "" : i < tts.nowSeg ? "rs-done" : i === tts.nowSeg ? "rs-now" : "";
+  function paintSegs(now) {   // read sentences dim, the current one is highlighted
+    const prev = tts.nowSeg;
+    if (now === prev || now < 0) return;
+    const lo = Math.max(0, Math.min(prev, now)), hi = Math.max(prev, now);
+    tts.nowSeg = now;
+    for (let i = lo; i <= hi; i++) document.querySelectorAll(`.rs[data-s="${i}"]`).forEach(el => { el.classList.toggle("rs-done", i < now); el.classList.toggle("rs-now", i === now); });
+    if (raOpen && Date.now() > raHold) { const el = document.querySelector(`#readsheet .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  }
+  function seekTo(f) { if (tts.on && tts.total) seekChar(f * tts.total); }   // tap on the bar
+  function seekChar(c) {   // jump to that sentence (or that second, within the piece playing)
+    if (!tts.on || !tts.total) return;
+    const target = Math.max(0, Math.min(tts.total - 1, c));
+    const j = tts.parts.findIndex(p => target >= p.c0 && target < p.c0 + p.t.length);
+    if (j < 0) return;
+    const p = tts.parts[j];
+    if (tts.engine === "ai" && j === tts.i && au.duration && isFinite(au.duration)) {
+      au.currentTime = au.duration * (target - p.c0) / p.t.length; tts.pos = target - p.c0; renderProgress(); return;
+    }
+    tts.token++;
+    if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
+    tts.i = j; tts.pos = 0; tts.paused = false; playSoon(); renderProgress();
+  }
+  function renderPlayer() {
+    const pl = $("#player"), on = tts.on;
+    pl.hidden = !on; document.body.classList.toggle("playing", on);
+    document.querySelectorAll(".speaking").forEach(el => el.classList.remove("speaking"));
+    if (!on) return;
+    const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
+    $("#plTitle").textContent = it.title || tts.label;
+    const mode = MODES[tts.kind] || "";
+    $("#plMode").textContent = mode; $("#plMode").hidden = !mode;
+    $("#plMode").className = "pl-mode m-" + (tts.kind || "x");
+    $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
+      + (tts.loading ? " — preparing…" : tts.paused ? " — paused" : "");
+    pl.classList.toggle("paused", tts.paused);
+    $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
+    $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
+    if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
+    renderProgress();
+  }
+  const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
+  // Sentences of the text being read, as tappable spans (tap one to jump there).
+  function segSpans(filter) {
+    const out = [];
+    tts.segs.forEach((sg, i) => { if (filter(sg)) out.push(`<span class="rs ${segCls(i)}" data-act="rsseek" data-s="${i}">${esc(mask(sg.show))}</span>`); });
+    return out.join(" ");
+  }
+  function refreshReadingViews() {
+    refreshInPlace();   // app hook: re-render any view that shows the text being read in place (BlogPulse: the TL;DR)
+    if (raOpen) renderReadAlong();
+  }
+  // Read-along: the whole text being read, following the voice; read sentences dim.
+  let raOpen = false, raHold = 0;
+  document.addEventListener("touchstart", e => { if (raOpen && e.target.closest && e.target.closest("#readsheet")) raHold = Date.now() + 6000; }, { passive: true });
+  function renderReadAlong() {
+    const el = $("#readsheet");
+    el.classList.toggle("open", raOpen); lockBody();
+    if (!raOpen) return;
+    const first = tts.items[0] || {}, mode = MODES[tts.kind] || "Reading";
+    let body = "";
+    if (!tts.on) body = `<p class="muted pad">Nothing is being read right now.</p>`;
+    else tts.items.forEach((it, k) => {
+      const paras = {};
+      tts.segs.forEach((sg, i) => { if (sg.k === k) (paras[sg.pi] = paras[sg.pi] || { head: sg.head, ids: [] }).ids.push(i); });
+      if (tts.items.length > 1 && k > 0) body += `<hr class="ra-sep">`;
+      Object.keys(paras).sort((x, y) => x - y).forEach(pi => {
+        const pr = paras[pi], html = pr.ids.map(i => `<span class="rs ${segCls(i)}" data-act="rsseek" data-s="${i}">${esc(mask(tts.segs[i].show))}</span>`).join(" ");
+        body += pr.head ? `<h2 class="ra-h">${html}</h2>` : `<p class="ra-p">${html}</p>`;
+      });
+    });
+    el.innerHTML = `<div class="sh-head"><div class="ra-top"><span class="pl-mode m-${tts.kind || "x"}">${esc(mode)}</span><small>${esc(tts.label)}</small></div><button class="link" data-act="raclose">Done</button></div>
+      <div class="ra-body">${body}<p class="note ra-hint">Tap a sentence to jump there. Read sentences are dimmed.</p></div>`;
+    const now = el.querySelector(".rs-now"); if (now && now.scrollIntoView) now.scrollIntoView({ block: "center" });
+  }
+  // ---- Stockit's readings (read-aloud, Step 2): items → paragraphs, with keys for highlighting in place ----
+  const sentence = t => { t = clean(t); return t && !/[.!?]$/.test(t) ? t + "." : t; };
+  const splitParas = t => String(t || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);   // the same paragraphs paras() shows
+  function tldrItems(x, h, d) {
+    return [{ id: "news-" + h.l, title: h.t, paras: [{ key: "title", head: true, text: h.t }, { key: "from", text: "From " + h.p }, { key: "lead", text: d.lead }]
+      .concat(d.story ? splitParas(d.story).map((t, i) => ({ key: "story" + i, text: t })) : (d.points || []).map((t, i) => ({ key: "pt" + i, text: t })))
+      .concat(d.why ? [{ key: "whyh", text: "What it could mean for " + (x.name || x.s) + "." }, { key: "why", text: d.why }] : []) }];
+  }
+  function briefItems(b) {
+    return [{ id: "brief", title: b.headline, paras: [{ key: "headline", head: true, text: b.headline }].concat(splitParas(b.story).map((t, i) => ({ key: "bs" + i, text: t }))) }]
+      .concat((b.watch || []).length ? [{ id: "brief", title: "Keep an eye on", paras: [{ key: "bwh", head: true, text: "Keep an eye on" }].concat(b.watch.map((t, i) => ({ key: "bw" + i, text: t }))) }] : []);
+  }
+  function storyItems(x, st) {
+    const id = "story-" + x.s, list = (pre, t, a) => a && a.length ? [{ id, title: t, paras: [{ key: pre + "h", head: true, text: t }].concat(a.map((s, i) => ({ key: pre + i, text: s }))) }] : [];
+    return [{ id, title: st.headline, paras: [{ key: "headline", head: true, text: st.headline }].concat(splitParas(st.story).map((t, i) => ({ key: "ss" + i, text: t }))) }]
+      .concat(list("sr", "Why " + st.signal, st.reasons), list("sk", "What could go wrong", st.risks), list("sw", "What to watch", st.watch));
+  }
+  // Highlighting in place (read-aloud, Step 6): the briefing card, a stock's story and a news item's TL;DR
+  const readingNow = id => tts.on && tts.id === id;
+  const inPlace = (id, key, plain) => readingNow(id) ? segSpans(sg => sg.key === key) || plain : plain;
+  const parasIn = (id, pre, ps) => readingNow(id) ? ps.map((p, i) => { const s = segSpans(sg => sg.key === pre + i); return s ? "<p>" + s + "</p>" : p; }) : ps;
+  function refreshInPlace() { render(); renderDetail(); renderNews(); }
+  // The full article (read-aloud, Step 7): speaking starts in the tap, the article follows
+  window.onArticleText = (id, r) => {
+    const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l);
+    if (!h || "art-" + h.l !== id) return;
+    if (r.error) return toast(r.error);
+    speak(h.p || x.s, [{ id, title: h.t, paras: [{ key: "title", head: true, text: h.t }, { key: "from", text: "From " + h.p }].concat(r.paras.map((t, i) => ({ key: "p" + i, text: t }))) }], undefined, "article");
+    if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
+  };
+  // Flash: a queue the player starts on at once (inside the tap, so audio is allowed) and fills as digests arrive.
+  // Stockit's addition to the shared engine: each digest re-plans the whole reading; earlier pieces come out the same, so the one playing carries on.
+  const itemText = it => it.text || (it.paras || []).map(p => p.text).join(". ");
   function waitOrStop() {
     if (tts.on && tts.waiting > 0) { tts.idle = true; tts.loading = true; renderPlayer(); return; }
     return stopSpeaking();
@@ -3064,19 +3234,26 @@ function clientApp() {
     const ai = aiTTS();
     if (!ai && (!SYN || !voices.length)) {   // no Web Speech: the system voice reads everything once it's ready
       const buf = []; let left = n;
-      window.toast("Reading the articles… the system voice starts when they're ready");
-      return it => { if (it) buf.push(it); if (--left === 0 && buf.length) send("speak", { text: buf.map(x => clean(x.text)).join(" ") }); };
+      toast("Reading the articles… the system voice starts when they're ready");
+      return it => { if (it) buf.push(it); if (--left === 0 && buf.length) send("speak", { text: buf.map(x => clean(itemText(x))).join(" ") }); };
     }
     stopSpeaking(true);
     if (ai) unlockAudio();
     const ses = Date.now() + Math.random();
-    Object.assign(tts, { engine: ai ? "ai" : "device", items: [], label, i: 0, paused: false, on: true, parts: [], waiting: n, idle: true, loading: true, ses });
+    Object.assign(tts, { engine: ai ? "ai" : "device", items: [], label, i: 0, paused: false, on: true, parts: [], segs: [], total: 0, pos: 0, kind: "summaries", id: "", nowSeg: -1, waiting: n, idle: true, loading: true, ses });
     renderPlayer();
     return it => {
       if (tts.ses !== ses || !tts.on) return;
       tts.waiting--;
-      if (it) { const k = tts.items.length; tts.items.push(it); (ai ? aiChunks : chunks)(it.text).forEach(t => tts.parts.push({ t, k })); }
-      if (tts.idle && tts.i < tts.parts.length) { tts.idle = false; playSoon(); }
+      if (it) {
+        tts.items.push(it);
+        const old = tts.parts, plan = buildPlan(tts.items, tts.engine === "ai");
+        plan.parts.forEach((p, j) => { if (old[j] && old[j].t === p.t) { p.audio = old[j].audio; p.pending = old[j].pending; } });
+        tts.parts = plan.parts; tts.segs = plan.segs; tts.total = plan.total;
+        if (!tts.id) tts.id = it.id || "";
+        if (raOpen) renderReadAlong();
+      }
+      if (tts.idle && tts.i < tts.parts.length) { tts.idle = false; tts.loading = false; playSoon(); }
       else if (tts.idle && !tts.waiting) stopSpeaking();
       else renderPlayer();
     };
@@ -3092,62 +3269,26 @@ function clientApp() {
   }
   window.onDigest = (id, d) => { if (!d.error) dg[id] = d; const w = dgWait[id]; delete dgWait[id]; if (w) w.res(d); if (tab === "flash") render(); };
   function digestItem(x, d) {
-    if (d.error) return { id: "fl-" + x.s, title: x.s, text: sentence(x.name || x.s) + " " + topNews(x).map(h => sentence(h.t) + " From " + h.p + ".").join(" ") };
-    return { id: "fl-" + x.s, title: (d.kind === "ai" ? "✦ " : "") + x.s + " — " + d.title, text: `${sentence(x.name || x.s)} ${sentence(d.title)} ${d.story.replace(/\s*\n+\s*/g, " ")} ${d.takeaway ? sentence(d.takeaway) : ""}` };
+    const id = "fl-" + x.s, name = { key: "name", head: true, text: x.name || x.s };
+    if (d.error) return { id, title: x.s, paras: [name].concat(topNews(x).map((h, i) => ({ key: "h" + i, text: sentence(h.t) + " From " + h.p + "." }))) };
+    return { id, title: (d.kind === "ai" ? "✦ " : "") + x.s + " — " + d.title, paras: [name, { key: "title", text: d.title }].concat(splitParas(d.story).map((t, i) => ({ key: "s" + i, text: t })), d.takeaway ? [{ key: "take", text: d.takeaway }] : []) };
   }
   async function listenNews(xs, label) {
     const add = speakQueue(label, xs.length);
-    if (S.settings.hasKey) window.toast(`Reading ${xs.length === 1 ? "the articles" : xs.length + " stocks' articles"}; the story starts in a few seconds`);
+    if (S.settings.hasKey) toast(`Reading ${xs.length === 1 ? "the articles" : xs.length + " stocks' articles"}; the story starts in a few seconds`);
     for (const x of xs) {
       const d = await getDigest(x);
-      if (d.note || d.error) window.toast(String(d.note || d.error).slice(0, 120));
+      if (d.note || d.error) toast(String(d.note || d.error).slice(0, 120));
       add(digestItem(x, d));
     }
   }
-  function stopSpeaking(quiet) {
-    tts.token++; tts.on = false; tts.paused = false; tts.loading = false; tts.waiting = 0; tts.idle = false; tts.ses = 0; clearTimeout(tts.timer);
-    au.onended = null; try { au.pause(); } catch (e) {}
-    if (SYN) SYN.cancel();
-    if (!quiet) renderPlayer();
-  }
-  function togglePause() {
-    if (!tts.on) return;
-    if (tts.engine === "ai") {
-      if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
-      else { tts.paused = true; au.pause(); }
-    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
-    renderPlayer();
-  }
-  function skipItem() {
-    if (!tts.on) return;
-    const k = (tts.parts[tts.i] || {}).k, j = tts.parts.findIndex((p, n) => n > tts.i && p.k !== k);
-    if (j < 0) { if (!tts.waiting) return stopSpeaking(); tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel(); tts.i = tts.parts.length; return waitOrStop(); }
-    tts.token++; if (tts.engine === "ai") { au.onended = null; au.pause(); } else SYN.cancel();
-    tts.i = j; tts.paused = false; playSoon();
-  }
-  function renderPlayer() {
-    const pl = $("#player"), on = tts.on;
-    pl.hidden = !on; document.body.classList.toggle("playing", on);
-    document.querySelectorAll(".speaking").forEach(el => el.classList.remove("speaking"));
-    if (!on) return;
-    const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
-    $("#plTitle").textContent = it.title || tts.label;
-    $("#plSub").textContent = (tts.engine === "ai" ? "✦ AI voice — " : "") + tts.label + (tts.items.length > 1 ? ` — ${part.k + 1} of ${tts.items.length}` : "")
-      + (tts.loading ? (tts.idle ? " — reading the articles…" : " — preparing…") : tts.paused ? " — paused" : "");
-    pl.classList.toggle("paused", tts.paused);
-    $("#plPause").innerHTML = tts.paused ? PLAY_ICO : PAUSE_ICO;
-    $("#plPause").setAttribute("aria-label", tts.paused ? "Resume" : "Pause");
-    if (it.id) { const c = document.getElementById("c-" + it.id); if (c) c.classList.add("speaking"); }
-    if (!on || tts.idle) document.querySelectorAll(".fl.speaking").forEach(el => el.classList.remove("speaking"));
-  }
-  const PLAY_ICO = `<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`, PAUSE_ICO = `<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>`;
   const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
   function listenHTML() {
     const eng = S.settings.speechEngine === "ai" ? "ai" : "device";
     return `<div class="lk-row"><span class="lk-l">Voice engine</span>${vseg("speechEngine", [["device", "iPhone voice"], ["ai", "✦ AI voice"]])}</div>` + (eng === "ai" ? aiListenHTML() : deviceListenHTML());
   }
   function aiListenHTML() {
-    if (!S.settings.hasOpenAI) return `<p class="note">AI voices come from OpenAI, so they need an OpenAI key, even when Claude writes your briefing (Claude's API doesn't offer speech).</p>
+    if (!S.settings.hasOpenAI) return `<p class="note">AI voices come from OpenAI, so they need an OpenAI key, even when Claude writes your summaries (Claude's API doesn't offer speech).</p>
       <div class="aic-btns"><button class="sm primary" data-act="aiopen">Add an OpenAI key</button></div>`;
     const model = S.settings.ttsModel || "gpt-4o-mini-tts", legacy = /^tts-1/.test(model), g = S.settings.voiceGender || "all";
     const vs = OAI_VOICES.filter(([v, gg]) => (!legacy || LEGACY_TTS.has(v)) && (g === "all" || gg === g || v === S.settings.ttsVoice));
@@ -3160,7 +3301,7 @@ function clientApp() {
       ${legacy ? "" : `<div class="lk-row"><span class="lk-l">How it should sound</span><textarea class="ttsinstr cfgin wide" rows="2" placeholder="e.g. Calm, clear newsreader. Neutral accent.">${esc(S.settings.ttsInstructions || "")}</textarea></div>`}
       <div class="lk-row"><span class="lk-l">Speed</span>${vseg("voiceRate", [[0.85, "Slow"], [1, "Normal"], [1.15, "Fast"], [1.3, "Faster"]])}</div>
       <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button></div>
-      <p class="note">✦ Spoken by OpenAI with your key, one piece at a time; the first piece takes a few seconds. OpenAI bills each use; Stockit counts the characters under AI settings › Token usage as “Read aloud”. Voice labels describe how each voice usually sounds.${loaded.length ? "" : " Load your OpenAI models in AI settings to see every speech model your key can use."}</p>`;
+      <p class="note">✦ Spoken by OpenAI with your key, one section at a time; the first piece takes a few seconds. OpenAI bills each use; Stockit counts the characters under AI settings › Token usage as “Read aloud”. Voice labels describe how each voice usually sounds.${loaded.length ? "" : " Load your OpenAI models in AI settings to see every speech model your key can use."}</p>`;
   }
   function deviceListenHTML() {
     if (!SYN || !voices.length) return `<p class="note">This device reads aloud with the system voice. Choose it in iOS Settings › Accessibility › Spoken Content.</p>`;
@@ -3180,6 +3321,37 @@ function clientApp() {
       <div class="aic-btns"><button class="sm" data-act="voicetest">${SPK}Test the voice</button><span class="note">${voices.length} voices on this ${/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone"}</span></div>
       <p class="note">More natural voices: iOS Settings › Accessibility › Spoken Content › Voices. Download an Enhanced or Premium voice and it appears here.</p>`;
   }
+  function readAloudAct(act, t, e) {
+    const v = t.dataset.v;
+    switch (act) {
+      case "plpause": togglePause(); return true;
+      case "plnext": skipItem(); return true;
+      case "plstop": stopSpeaking(); return true;
+      case "plread": raOpen = !raOpen; raHold = 0; renderReadAlong(); return true;
+      case "raclose": raOpen = false; renderReadAlong(); return true;
+      case "rsseek": { const sg = tts.segs[+t.dataset.s]; if (tts.on && sg) { raHold = 0; seekChar(sg.a0); } return true; }
+      case "plseek": { const r = t.getBoundingClientRect(); seekTo((e.clientX - r.left) / Math.max(1, r.width)); return true; }
+      case "voiceset": {
+        const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
+        if (k === "speechEngine" && tts.on) stopSpeaking();
+        S.settings[k] = val; send("set", { k, v: val }); renderCfg(); return true;
+      }
+      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is the voice that will read to you." }], undefined, "test"); return true;
+    }
+    return false;
+  }
+
+  // Settings › Listening menus report through "change"
+  document.addEventListener("change", e => {
+    if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
+    if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
+    if (e.target.classList && e.target.classList.contains("ttsinstr")) { S.settings.ttsInstructions = e.target.value.trim(); send("set", { k: "ttsInstructions", v: S.settings.ttsInstructions }); return; }
+    if (e.target.classList && e.target.classList.contains("voicesel")) {
+      S.settings.voiceURI = e.target.value; send("set", { k: "voiceURI", v: e.target.value });
+      if (tts.on && tts.engine === "device") { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
+    }
+  });
+
   // ---- Check my portfolio: screenshots of your broker's app, compared with Stockit; you apply each change ----
   const CK = {   // what each result means, with its badge
     match: ["ok", "✓ Matches", "Shares and average price match your broker."],
@@ -3287,7 +3459,7 @@ function clientApp() {
     }, 300);
     renderCheck();
   };
-  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen)); }
+  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen || raOpen)); }
 
   // ---- interactions ----
   const shareText = (title, by, body) => `${title}\n\n${String(body || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")}\n\n✦ Written by ${PN[by] || by} in Stockit. Not financial advice.`;
@@ -3305,6 +3477,7 @@ function clientApp() {
     const t = e.target.closest("[data-act]");
     if (!t || t.disabled) return;
     const act = t.dataset.act, v = t.dataset.v;
+    if (readAloudAct(act, t, e)) return;   // read aloud: player, text view and Settings › Listening
     switch (act) {
       case "tab": if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
@@ -3315,20 +3488,12 @@ function clientApp() {
       case "unfoldall": setFold(Object.keys(fold()), false); break;
       case "newsclose": newsOpen = null; renderNews(); break;
       case "tldrretry": if (newsOpen) { tl[newsOpen.l] = "loading"; send("tldr", { s: newsOpen.s, l: newsOpen.l, id: newsOpen.l, force: true }); renderNews(); } break;
-      case "listentldr": { send("usage-listen", { kind: "summary" }); const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak("TL;DR", tldrItems(x, h, d)); break; }
-      case "listenbrief": send("usage-listen", { kind: "brief" }); if (S.briefing) speak("Briefing", briefItems(S.briefing)); break;
-      case "listenstory": { send("usage-listen", { kind: "story" }); const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story)); break; }
+      case "listentldr": { send("usage-listen", { kind: "summary" }); const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l), d = h && tl[h.l]; if (d && d !== "loading" && !d.error) speak(h.p || x.s, tldrItems(x, h, d), undefined, "tldr"); break; }
+      case "listenarticle": { send("usage-listen", { kind: "article" }); const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l); if (h) { speak(h.p || x.s, [{ id: "art-" + h.l, title: h.t, paras: [{ text: "Loading the article." }] }], undefined, "article"); send("articletext", { s: x.s, l: h.l, id: "art-" + h.l }); } break; }
+      case "listenbrief": send("usage-listen", { kind: "brief" }); if (S.briefing) speak("Briefing", briefItems(S.briefing), undefined, "story"); break;
+      case "listenstory": { send("usage-listen", { kind: "story" }); const x = byS(v); if (x && x.story) speak(x.s + " story", storyItems(x, x.story), undefined, "story"); break; }
       case "listenflash": { send("usage-listen", { kind: "flash" }); const xs = flashOrder().filter(x => !isFolded(x) && topNews(x).length); if (xs.length) listenNews(xs, "Flash"); else window.toast("No headlines to read yet"); break; }
       case "listenstock": { send("usage-listen", { kind: "stock" }); const x = byS(v); if (!x || !topNews(x).length) break; const cur = tts.on && (tts.items[(tts.parts[tts.i] || {}).k] || {}).id === "fl-" + x.s; if (cur || (tts.on && tts.label === x.s + " news")) togglePause(); else listenNews([x], x.s + " news"); break; }
-      case "plpause": togglePause(); break;
-      case "plnext": skipItem(); break;
-      case "plstop": stopSpeaking(); break;
-      case "voiceset": {
-        const k = t.dataset.k, val = k === "voiceGender" || k === "speechEngine" ? v : +v;
-        if (k === "speechEngine" && tts.on) stopSpeaking();
-        S.settings[k] = val; send("set", { k, v: val }); renderCfg(); break;
-      }
-      case "voicetest": speak("Voice test", [{ title: "Voice test", text: "Hello! This is how Stockit will read your briefing, stories and headlines to you." }]); break;
       case "stratadd": {
         const tx = stratText.trim();
         if (!tx) { window.toast("Describe your strategy first"); const ta = $("#stratText"); if (ta) ta.focus(); break; }
@@ -3467,14 +3632,6 @@ function clientApp() {
   document.addEventListener("change", e => {
     if (e.target.id === "stratEvery") { const v2 = +e.target.value; S.cfg.stratEvery = v2; send("cfg", { k: "stratEvery", v: v2 }); window.toast(v2 ? `Suggestions refresh every ${v2 >= 24 ? (v2 / 24 === 1 ? "day" : v2 / 24 + " days") : v2 + " hours"}` : "Suggestions refresh only when you tap Refresh"); return; }
     if (e.target.id === "homeCur") { S.fx = Object.assign({}, S.fx, { choice: e.target.value }); send("set", { k: "homeCur", v: e.target.value }); window.toast("Converting to " + (e.target.value === "auto" ? "your main currency" : e.target.value) + "…"); return; }
-    if (e.target.classList && e.target.classList.contains("ttsvoicesel")) { S.settings.ttsVoice = e.target.value; send("set", { k: "ttsVoice", v: e.target.value }); return; }
-    if (e.target.classList && e.target.classList.contains("ttsmodelsel")) { S.settings.ttsModel = e.target.value; send("set", { k: "ttsModel", v: e.target.value }); renderCfg(); return; }
-    if (e.target.classList && e.target.classList.contains("ttsinstr")) { S.settings.ttsInstructions = e.target.value.trim(); send("set", { k: "ttsInstructions", v: S.settings.ttsInstructions }); return; }
-    if (e.target.classList && e.target.classList.contains("voicesel")) {
-      S.settings.voiceURI = e.target.value; send("set", { k: "voiceURI", v: e.target.value });
-      if (tts.on && tts.engine === "device") { tts.token++; SYN.cancel(); playSoon(); }   // switch voice mid-sentence
-      return;
-    }
     const el = e.target;
     if (el.classList && el.classList.contains("modelsel")) send("aimodel", { p: el.dataset.p, v: el.value });
     else if (el.classList && el.classList.contains("cfgin") && el.dataset.k) {
@@ -3638,6 +3795,59 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .stepper input{width:86px;text-align:center;font:600 16px var(--sans);padding:7px 6px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .stepper .unit{font-size:calc(14px * var(--ts));color:var(--ink-2);min-width:2.5em}
 .stepper .range{flex-basis:100%;font-size:calc(12px * var(--ts));color:var(--muted)}
+/* Read aloud (app-blueprints · read-aloud 1.0.0): from snippets/read-aloud/read-aloud.css; Stockit's list is #main and its items .fl */
+.gh-listen{display:inline-flex;align-items:center;color:var(--signal);font-weight:600;font-size:calc(13.5px * var(--ts))}
+.listen{display:inline-flex;align-items:center;margin:0 0 18px;padding:9px 14px;border-radius:20px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(14.5px * var(--ts))}
+.tl-listen{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
+.fl.speaking{box-shadow:inset 4px 0 0 var(--amber)}
+.voicesel{display:block;width:100%;margin-top:8px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
+#player{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:30;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:var(--ink);color:var(--paper);box-shadow:0 8px 28px rgba(0,0,0,.28)}
+#player[hidden]{display:none}
+#player{flex-wrap:wrap}
+.pl-foot{flex-basis:100%;display:flex;align-items:center;gap:10px;margin-top:2px}
+.pl-prog{flex:1;height:18px;display:flex;align-items:center;cursor:pointer;position:relative}
+.pl-prog::before{content:"";position:absolute;left:0;right:0;height:4px;border-radius:2px;background:rgba(127,127,127,.35)}
+.pl-prog i{position:relative;display:block;height:4px;width:0;border-radius:2px;background:var(--signal);transition:width .25s linear}
+#plTime{font-size:11.5px;opacity:.8;white-space:nowrap;font-variant-numeric:tabular-nums}
+body.playing #main{padding-bottom:120px}
+body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 112px)}
+.rs{border-radius:4px;transition:background .2s,color .2s,opacity .2s;cursor:pointer;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.rs-done{opacity:.45}
+.rs-now{background:var(--signal-wash);color:var(--ink);box-shadow:0 0 0 2px var(--signal-wash),inset 0 -2px 0 var(--signal)}
+#readsheet{z-index:25}
+.ra-top{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ra-top small{color:var(--muted);font-size:calc(13px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ra-body{max-width:680px;margin:0 auto;padding:16px 20px 150px}
+.ra-h{font:700 calc(22px * var(--ts))/1.3 var(--display);margin:6px 0 10px}
+.ra-p{font-size:calc(18px * var(--ts));line-height:1.7;margin:0 0 16px;color:var(--ink)}
+html[data-font=serif] .ra-p{font-family:var(--serif)}
+.ra-sep{border:0;border-top:1px solid var(--rule);margin:22px 0}
+.ra-hint{text-align:center;margin-top:24px}
+.pl-mode{display:inline-block;align-self:flex-start;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:2px 7px;border-radius:5px;margin-bottom:2px;background:rgba(127,127,127,.28)}
+.pl-mode.m-article{background:#2DD4BF;color:#0E1116}
+.pl-mode.m-tldr{background:#A78BFA;color:#0E1116}
+.pl-mode.m-story{background:#F5C04A;color:#0E1116}
+.pl-mode.m-summaries{background:#7AB4FF;color:#0E1116}
+.sh-head .pl-mode{font-size:11.5px}
+.lsbtn{display:inline-flex;align-items:center;flex:none;min-height:32px;padding:4px 10px 4px 8px;border-radius:16px;background:var(--sheet);color:var(--ink-2);border:1.5px solid var(--rule);font-weight:700;font-size:calc(13px * var(--ts));white-space:nowrap}
+.lsbtn .ico{width:15px;height:15px;margin-right:4px}
+.lsbtn.mini{min-height:28px;padding:2px 7px}
+.lsbtn.mini .ico{margin-right:0}
+.lsbtn:active{transform:scale(.95)}
+.pl-info{flex:1;min-width:0}
+.pl-info .pl-mode[hidden]{display:none}
+.pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-info b{font-size:14.5px}
+.pl-info small{font-size:12px;opacity:.75}
+.pl-btn{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;flex:none;background:rgba(127,127,127,.22)}
+.pl-btn svg{width:20px;height:20px;fill:currentColor}
+.eq{display:flex;align-items:flex-end;gap:2px;height:16px;flex:none}
+.eq i{width:3px;height:100%;background:currentColor;border-radius:2px;animation:eq 1s ease-in-out infinite}
+.eq i:nth-child(2){animation-delay:-.35s}.eq i:nth-child(3){animation-delay:-.7s}
+#player.paused .eq i{animation:none;height:40%}
+@keyframes eq{0%,100%{height:30%}50%{height:100%}}
+/* Reduce Motion: no bouncing bars, no sliding bar, no fading highlight */
+@media (prefers-reduced-motion: reduce){.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}}
 .cfgin.wide{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
 .cfg-foot{margin-top:18px}
@@ -4018,24 +4228,7 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .ico path:first-child{fill:currentColor;stroke:none}
 .sm .ico{width:15px;height:15px}
 .sm{display:inline-flex;align-items:center}
-.listen{display:inline-flex;align-items:center;padding:9px 14px;border-radius:20px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(14.5px * var(--ts))}
-.voicesel{display:block;width:100%;margin-top:8px;font:16px var(--sans);color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:9px;padding:9px 10px}
 .cfgin.wide{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);-webkit-user-select:text;user-select:text}
-#player{position:fixed;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom) + 10px);z-index:30;display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px;background:var(--ink);color:var(--paper);box-shadow:0 8px 28px rgba(0,0,0,.28)}
-#player[hidden]{display:none}
-.pl-info{flex:1;min-width:0}
-.pl-info b,.pl-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-info b{font-size:14.5px}
-.pl-info small{font-size:12px;opacity:.75}
-.pl-btn{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;flex:none;background:rgba(127,127,127,.22)}
-.pl-btn svg{width:20px;height:20px;fill:currentColor}
-.eq{display:flex;align-items:flex-end;gap:2px;height:16px;flex:none}
-.eq i{width:3px;height:100%;background:currentColor;border-radius:2px;animation:eq 1s ease-in-out infinite}
-.eq i:nth-child(2){animation-delay:-.35s}.eq i:nth-child(3){animation-delay:-.7s}
-#player.paused .eq i{animation:none;height:40%}
-@keyframes eq{0%,100%{height:30%}50%{height:100%}}
-body.playing #main{padding-bottom:96px}
-body.playing #toast{bottom:calc(env(safe-area-inset-bottom) + 84px)}
 @media (prefers-reduced-motion:reduce){
   .eq i{animation:none;height:60%} .busy-dot{animation-duration:2.4s}
   .splash *{animation:none!important;opacity:1!important;transform:none!important;stroke-dashoffset:0!important}
@@ -4083,12 +4276,15 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
 <div id="newssheet" class="sheet" aria-label="TL;DR"></div>
 <div id="checksheet" class="sheet" aria-label="Check my portfolio"></div>
+<div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
   <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-  <div class="pl-info"><b id="plTitle"></b><small id="plSub"></small></div>
+  <div class="pl-info"><span id="plMode" class="pl-mode" hidden></span><b id="plTitle"></b><small id="plSub"></small></div>
+  <button class="pl-btn" data-act="plread" aria-label="Show the text being read"><svg viewBox="0 0 24 24"><path d="M5 5h14M5 9.5h14M5 14h10M5 18.5h7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg></button>
   <button id="plPause" class="pl-btn" data-act="plpause" aria-label="Pause"></button>
   <button class="pl-btn" data-act="plnext" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M6 5l9 7-9 7zM16 5h3v14h-3z"/></svg></button>
   <button class="pl-btn" data-act="plstop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg></button>
+  <div class="pl-foot"><div id="plProg" class="pl-prog" data-act="plseek" role="progressbar" aria-label="Reading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="plBar"></i></div><span id="plTime"></span></div>
 </div>
 <div id="toast" role="status"></div>
 <script>

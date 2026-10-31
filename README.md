@@ -117,7 +117,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | ⚡ **Flash** | A tab with every stock on the left and its top three headlines on the right, owned stocks first. Beside the headlines: your shares, today's profit or loss, Stockit's view, the analysts' average rating and the crowd's mood. Fold a card once read; it opens again when new headlines arrive. |
 | ✂️ **TL;DR of any headline** | Tap a headline, in Flash or on a stock's page, for a one-line gist, the key points and what it could mean for the stock, then **Read the full article** at the publisher. ✦ AI writes it when you have a key; without one, the key sentences are taken from the article itself. |
 | 🎧 **Listen to a stock's news** | Tap a stock in Flash: Stockit reads three of its articles in full (skipping any it can't open) and ✦ AI tells them as one spoken story of 350 to 550 words, naming its sources, then what it could mean for the stock. The story then appears under the card with its sources. Without a key, each article's key sentences are read in turn. |
-| 🔊 **Read aloud** | **Listen** to the briefing, a stock's story, any TL;DR or the whole Flash. Pause, skip or stop from the player at the bottom. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
+| 🔊 **Read aloud** | **Listen to the briefing**, **Listen to the story**, **Listen to TL;DR**, the full **Article**, or the Flash **Headlines**. The player says what it's reading (STORY, TL;DR, FULL ARTICLE, SUMMARIES), shows how far along it is and the time left (tap the bar to jump), and highlights the sentence being read in the briefing, a story or a TL;DR; **Text** opens the whole text following the voice. Use your iPhone's own voices (free, offline) or a natural **✦ AI voice** from OpenAI. |
 | 📰 **Headlines and the crowd** | Business news from Yahoo Finance, wider coverage from the web through Google News, and how StockTwits posts lean, bullish or bearish. Each source can be switched off. |
 | ✦ **Daily briefing** | After a refresh, AI writes a short story of your portfolio today, what to keep an eye on, and a buy, hold or sell view with one line per stock. At most every 6 hours, or when your stocks change. Once you've read it and moved on, it folds down to its headline; tap to open it again. |
 | ✦ **A story per stock** | What the company does, what's happening now and why, whether the price looks cheap or expensive, why buy, what could go wrong and what to watch, with numbered links to its sources. |
@@ -281,7 +281,7 @@ Tap a headline to open its **TL;DR**:
 
 - **The gist** in one sentence, **the story** in two or three paragraphs, the **key facts** and **what it could mean** for the stock.
 - **✦ AI summary** when you have a key, labelled with the provider. Without a key, Stockit picks the key sentences from the article itself, labelled **no AI**.
-- **Listen** reads it aloud. **Read the full article at …** opens the original at the publisher.
+- **Listen to TL;DR** reads the summary aloud, highlighting each sentence as it goes; **Article** reads the whole original article (it starts speaking at once, and falls back to the excerpt if the page can't be read). **Read the full article at …** opens the original at the publisher.
 - **More about** the same stock is listed underneath, one tap away.
 
 Google News links are followed to the publisher's own article. Some articles still can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
@@ -292,7 +292,7 @@ Google News links are followed to the publisher's own article. Some articles sti
 
 <img src="docs/screenshots/19-listening.png" width="250" align="right" alt="Settings › Listening: choose iPhone voice or AI voice">
 
-Tap **Listen** on the briefing, a stock's story, a TL;DR or the Flash tab. A player bar appears at the bottom with pause, next and stop; the item being read is marked in Flash.
+Tap **Listen to the briefing**, **Listen to the story**, **Listen to TL;DR**, **Article** on a news item, or **Headlines** on the Flash tab. A player appears at the bottom with what it's reading (a coloured STORY, TL;DR, FULL ARTICLE or SUMMARIES label), a progress bar with the time left (tap it to jump), and **Text**, pause, next and stop. While the briefing, a story or a TL;DR is read, its current sentence lights up and the ones already read dim; **Text** opens the whole text in a sheet that follows the voice, and tapping any sentence jumps there. The stock being read is marked in Flash. It's the shared [read-aloud](https://github.com/gadominas/app-blueprints/blob/main/blueprints/read-aloud.md) blueprint, so every app reads aloud the same way.
 
 Choose the voice in **Settings › Listening**:
 
@@ -360,9 +360,9 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | Put a read card away | Tap **✓ Read — fold it**; tap the folded line to open it again. **Fold all** and **Open all** are at the top |
 | Get the gist of a headline | Tap it, in Flash or on a stock's page, for its TL;DR |
 | Read the whole article | In the TL;DR, tap **Read the full article at …** |
-| Hear a stock's news as a story | Tap the stock in **Flash** (tap again to pause); **Listen** at the top plays every open card in turn |
+| Hear a stock's news as a story | Tap the stock in **Flash** (tap again to pause); **Headlines** at the top plays every open card in turn |
 | Read the story you heard | Open **The story you heard** under the card |
-| Listen instead of reading | Tap **Listen** on the briefing, a story or a TL;DR. Pause, skip or stop from the player |
+| Listen instead of reading | **Listen to the briefing**, **Listen to the story**, **Listen to TL;DR** or **Article**. Pause, skip, stop or jump from the player; **Text** shows the words as they're read |
 | Change the voice | **Settings › Listening**: **iPhone voice** or **✦ AI voice**, then **Test the voice** |
 | Refresh prices and news | Tap refresh |
 | Change anything else | Tap **Settings** |
