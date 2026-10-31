@@ -2,6 +2,19 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.17.0 (2026-10-31): Hear it, follow it
+
+- 🎧 **Know what's playing**: The player names what it reads — story, TL;DR, full article or headlines — and shows the time left.
+- 🖍️ **Follow along**: The sentence being read lights up in the briefing, a story or a TL;DR; Text shows it all as it's read.
+- 📰 **Whole articles**: Article on any headline reads the original in full, starting at once.
+
+**Changes**
+
+- Read aloud (app-blueprints · read-aloud 1.0.0): the shared player with a mode label, progress bar, time left and tap-to-jump; Text opens the words being read, following the voice
+- Buttons say what they read: Listen to the briefing, Listen to the story, Listen to TL;DR, Article and Headlines
+- The current sentence is highlighted in the briefing, a stock's story and a TL;DR while it's read, and read sentences dim
+- New: Article reads a headline's original article in full, falling back to the excerpt
+
 ## 1.16.0 (2026-10-31): Anonymous usage, if you agree
 
 - 📊 **Help shape Stockit**: If you agree, Stockit sends anonymous counts of the features you use. Nothing else.
