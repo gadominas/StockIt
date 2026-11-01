@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -57,7 +57,7 @@ const BLUEPRINTS = [
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.0.0', since: '1.17.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.1.0', since: '1.18.0' },
 ];
 
 // ---------- config ----------
@@ -264,6 +264,7 @@ const settings = Object.assign(
     speechEngine: "device", voiceURI: "", voiceRate: 1, voicePitch: 1, voiceGender: "all",   // Listening: iPhone voice
     ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",                    // Listening: ✦ AI voice (OpenAI)
     checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    openInReader: true,   // read aloud 1.1.0: a headline's full article opens in Stockit's reader (off: Safari)
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     theme: "auto", density: "comfortable", font: "sans", textSize: 1,           // Appearance
     lastRefresh: 0 },                                                           // internal state
@@ -1019,6 +1020,77 @@ function reportAdd(r) {
 // The article is read here (Google News links are followed to the publisher when the page names it); paywalls, consent
 // pages and apps that need JavaScript leave only the headline and summary, and the TL;DR says so.
 const plain = s => decode(String(s || "").replace(/<(script|style)[\s\S]*?<\/\1>/gi, " "));
+// ---- the reader (read-aloud 1.1.0, Step 8): an article's own text in Stockit, with Listen and questions ----
+// The blueprint's readArticle() and extractReader(), written with Stockit's own helpers: pages come through articleHTML(),
+// which answers Yahoo's consent form, and text through plain(). Stockit's older readArticle() keeps serving TL;DRs and digests.
+function extractReader(html) {
+  const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); const c = m && m[0].match(/content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i); return c ? plain(c[1] ?? c[2] ?? "").replace(/\s+/g, " ").trim() : ""; };
+  let image = meta("og:image") || meta("twitter:image");
+  if (!/^https:\/\//i.test(image)) image = "";
+  const byline = meta("author") || meta("article:author");
+  let h = html.replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe|figure|button)\b[\s\S]*?<\/\1>/gi, " ");
+  const main = h.match(/<article[\s>][\s\S]*<\/article>/i) || h.match(/<main[\s>][\s\S]*<\/main>/i);
+  if (main) h = main[0];
+  const text = s => plain(String(s).replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  const blocks = [], junk = /^(share|subscribe|sign up|follow us|related( posts| articles)?|advertisement|comments?|read more|tags?:)\b/i;
+  for (const m of h.matchAll(/<(p|h2|h3|h4|li|pre|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const tag = m[1].toLowerCase();
+    if (tag === "pre") {   // code keeps its line breaks
+      const code = plain(m[2].replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/\n{3,}/g, "\n\n").replace(/^\n+|\s+$/g, "");
+      if (code) blocks.push({ t: "pre", text: code.slice(0, 4000) });
+      continue;
+    }
+    const t = text(m[2]);
+    if (!t || (t.length < 60 && junk.test(t))) continue;
+    if (blocks.length && blocks[blocks.length - 1].text === t) continue;
+    if (tag[0] === "h") { if (t.length > 2 && t.length < 120) blocks.push({ t: "h", text: t }); }
+    else if (tag === "li") { if (t.length >= 15) blocks.push({ t: "li", text: t }); }
+    else if (tag === "blockquote") { if (t.length >= 20) blocks.push({ t: "q", text: t }); }
+    else if (t.length >= 30) blocks.push({ t: "p", text: t });
+  }
+  const words = blocks.filter(b => b.t !== "h" && b.t !== "pre").reduce((n, b) => n + b.text.split(/\s+/).length, 0);
+  return { blocks: blocks.slice(0, 400), image, byline, words, minutes: Math.max(1, Math.round(words / 230)) };
+}
+const readerCache = {};   // link → the article's text, for questions about it (this session only)
+async function readerArticle(n) {   // { blocks, image, byline, words, minutes } or { blocked: why }
+  let r;
+  try { r = await articleHTML(n.l); }
+  catch (e) {
+    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1];
+    return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable" };
+  }
+  if (!r || !r.html) return { blocked: "unreachable" };
+  const rd = extractReader(r.html);
+  if (rd.words >= 120) {
+    readerCache[n.l] = rd.blocks.filter(b => b.t !== "pre").map(b => b.text).join("\n\n");
+    return rd;
+  }
+  const html = r.html;
+  const why = /subscribe to (continue|read)|subscribers?[- ]only|paywall|(sign|log) in to (continue|read)|create a (free )?account to/i.test(html) ? "signin"
+    : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
+  return { blocked: why };
+}
+// A headline in Stockit's news, found by the reader's id ("art-" + link); nothing outside the news is ever opened
+function newsByReaderId(id) {
+  const l = String(id || "").replace(/^art-/, "");
+  for (const s of Object.keys(market)) { const n = ((market[s] || {}).news || []).find(h => h.l === l); if (n) return { s, n }; }
+  return null;
+}
+const excerptOf = n => ((tldrs[tldrId(n.l)] || {}).lead) || "";
+// Questions about one article, answered from its text
+async function askArticle(s, n, q, hist) {
+  if (!aiKey()) throw new Error("Add an AI key in Settings › AI settings");
+  if (!q) throw new Error("Type a question first");
+  if (!readerCache[n.l]) await readerArticle(n);
+  const text = readerCache[n.l] || "";
+  const basis = text ? text.slice(0, 24000) : `Only a summary is available (the full article couldn't be read):\n${excerptOf(n) || "(none)"}`;
+  const system = "You answer questions about one article for a busy reader. Use the article as your source. If the article doesn't answer the question, say so in one sentence, then answer briefly from general knowledge and say that part isn't from the article. Be concise: one to four short paragraphs, or a few bullets starting with \"- \". Plain text, no headings, no tables. Answer in the language of the question. This is not financial advice.";
+  const past = hist.map(h => `Q: ${String(h.q || "").slice(0, 600)}\nA: ${String(h.a || "").slice(0, 1500)}`).join("\n\n");
+  const user = `Article: ${n.t}\nPublished by: ${n.p}\nAbout the stock: ${s}\n\n${basis}\n\n${past ? "Earlier in this conversation:\n" + past + "\n\n" : ""}Question: ${q}`;
+  const out = String(await aiCall(system, user, 900, "chat")).trim();
+  if (!out) throw new Error("the AI returned an empty answer");
+  return out;
+}
 function extractArticle(html) {
   const meta = name => { const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, "i")); const c = m && m[0].match(/content\s*=\s*"([^"]*)"|content\s*=\s*'([^']*)'/i); return c ? plain(c[1] || c[2]) : ""; };
   const desc = meta("og:description") || meta("description");
@@ -1563,7 +1635,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1676,7 +1748,7 @@ async function handle(m) {
     case "state": return push();
     case "set":
       if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen",
+      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -1797,9 +1869,29 @@ async function handle(m) {
     case "articletext": {   // read aloud: the article's own text, for a headline in Stockit's news (never any other address)
       const n = ((market[m.s] || {}).news || []).find(h => h.l === m.l);
       if (!n) return call("onArticleText", m.id, { error: "This headline is no longer in the list. Refresh and try again" });
-      const r = await readArticle(n), excerpt = (r.art && r.art.desc) || "";
-      const res = r.usable ? { paras: r.art.paras.slice(0, 80) } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
+      const rd = await readerArticle(n), excerpt = excerptOf(n);   // the same text the reader shows (read-aloud 1.1.0)
+      const res = !rd.blocked ? { blocks: rd.blocks } : excerpt ? { paras: [excerpt], partial: true } : { error: "This article couldn't be read" };
       return call("onArticleText", m.id, res);
+    }
+    case "reader": {   // a headline opened in the reader: its text, or why it can't be shown
+      const f = newsByReaderId(m.id); if (!f) return;
+      track("reader_opened");
+      if (m.cached) return;
+      const res = await readerArticle(f.n);
+      if (res.blocked) res.excerpt = excerptOf(f.n);
+      return call("onReader", m.id, res);
+    }
+    case "askarticle": {   // a question about the article open in the reader
+      const f = newsByReaderId(m.id); if (!f) return;
+      let res;
+      try { res = { text: await askArticle(f.s, f.n, String(m.q || "").trim().slice(0, 600), Array.isArray(m.hist) ? m.hist.slice(-6) : []), provider: settings.aiProvider }; track("article_asked", { provider: settings.aiProvider }); }
+      catch (e) { res = { error: String(e.message || e) }; }
+      return call("onAsk", m.id, res);
+    }
+    case "open": {   // the reader's Original: only a headline in the news
+      const f = m.orig ? newsByReaderId(m.id) : null;
+      if (f) await Safari.openInApp(f.n.l, false);
+      return;
     }
     case "ttsaudio":   // one piece of ✦ AI speech, returned to the page as base64 MP3
       try { return call("__done", m.req, true, await aiSpeech(m.text)); }
@@ -1907,7 +1999,7 @@ function clientApp() {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", check: "Portfolio checks", strategies: "Strategy suggestions", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", chat: "Article questions", check: "Portfolio checks", strategies: "Strategy suggestions", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
   const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); if (S.busy.strat) busyK.add("strat"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
@@ -2748,6 +2840,7 @@ function clientApp() {
       ${sw("newsYahoo", "Yahoo Finance headlines", "Business news about each stock")}
       ${sw("newsWeb", "Headlines from the web", "Wider coverage through Google News, including blogs and big newspapers")}
       ${sw("crowd", "Crowd mood", "How StockTwits posts lean, bullish or bearish (US tickers)")}
+      ${sw("openInReader", "Open articles in the reader", "The article's own text in Stockit, with Listen and questions. Off: open it in Safari")}
       <div class="srow"><div class="grow"><b>Finnhub key (optional)</b><small class="muted">${fh.last4 ? "Saved, ending …" + esc(fh.last4) : "Not set"}. A backup source for company numbers when Yahoo doesn't answer.</small></div>
         <button class="sm" data-act="secret-set" data-v="finnhub">${fh.last4 ? "Change" : "Add"}</button>${fh.last4 ? `<button class="sm danger ${secArmed === "finnhub" ? "armed" : ""}" data-act="secret-remove" data-v="finnhub">${secArmed === "finnhub" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <h3 class="sec">AI advice</h3>
@@ -2924,13 +3017,13 @@ function clientApp() {
       <h2 class="tl-h">${esc(h.t)}</h2>
       <h3 class="mini">TL;DR</h3>
       ${body}
-      <button class="primary block" data-act="openlink" data-v="${esc((d && d.url) || h.l)}">Read the full article at ${esc(h.p)}</button>
+      ${S.settings.openInReader === false ? `<button class="primary block" data-act="openlink" data-v="${esc((d && d.url) || h.l)}">Read the full article at ${esc(h.p)}</button>` : `<button class="primary block" data-act="rdopen">Read the full article</button>`}
       <p class="note">Summaries can miss details, and nothing here is financial advice.</p>
       ${more.length ? `<h3 class="sec">More about ${esc(x.s)}</h3>${more.map(n => `<button class="news" data-act="newsopen" data-s="${esc(x.s)}" data-v="${esc(n.l)}"><b>${esc(n.t)}</b><small>${esc(n.p)} · ${rel(n.at)}</small></button>`).join("")}` : ""}
     </div>`;
     el.scrollTop = keep;
   }
-  // ---- read aloud (app-blueprints · read-aloud 1.0.0): the engine, player, highlighting, text view, Settings › Listening and
+  // ---- read aloud (app-blueprints · read-aloud 1.1.0): the engine, player, highlighting, text view, Settings › Listening and
   // tap handlers come from app-blueprints/snippets/read-aloud (names kept); Stockit's changes to them are marked "Stockit:".
   // Uses Stockit's $, esc, send, S.settings, lockBody, cfgOpen, renderCfg, mask, and window.toast as toast.
   const toast = m => window.toast(m);
@@ -3126,6 +3219,7 @@ function clientApp() {
     tts.nowSeg = now;
     for (let i = lo; i <= hi; i++) document.querySelectorAll(`.rs[data-s="${i}"]`).forEach(el => { el.classList.toggle("rs-done", i < now); el.classList.toggle("rs-now", i === now); });
     if (raOpen && Date.now() > raHold) { const el = document.querySelector(`#readsheet .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+    else if (!raOpen && rdId && tts.id === rdId && Date.now() > rdHold) { const el = document.querySelector(`#reader .rs[data-s="${now}"]`); if (el && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
   }
   function seekTo(f) { if (tts.on && tts.total) seekChar(f * tts.total); }   // tap on the bar
   function seekChar(c) {   // jump to that sentence (or that second, within the piece playing)
@@ -3148,6 +3242,7 @@ function clientApp() {
     if (!on) return;
     const part = tts.parts[tts.i] || {}, it = tts.items[part.k] || {};
     $("#plTitle").textContent = it.title || tts.label;
+    if (rdId) renderReaderTools();
     const mode = MODES[tts.kind] || "";
     $("#plMode").textContent = mode; $("#plMode").hidden = !mode;
     $("#plMode").className = "pl-mode m-" + (tts.kind || "x");
@@ -3172,7 +3267,12 @@ function clientApp() {
   }
   // Read-along: the whole text being read, following the voice; read sentences dim.
   let raOpen = false, raHold = 0;
-  document.addEventListener("touchstart", e => { if (raOpen && e.target.closest && e.target.closest("#readsheet")) raHold = Date.now() + 6000; }, { passive: true });
+  let rdId = "", rdHold = 0;   // the reader (reader.page.js): the post open in it, and when to follow the voice again; stays empty without it
+  document.addEventListener("touchstart", e => {
+    if (!e.target.closest) return;
+    if (raOpen && e.target.closest("#readsheet")) raHold = Date.now() + 6000;
+    if (rdId && e.target.closest("#reader")) rdHold = Date.now() + 6000;   // reading by hand: stop following the voice for a moment
+  }, { passive: true });
   function renderReadAlong() {
     const el = $("#readsheet");
     el.classList.toggle("open", raOpen); lockBody();
@@ -3214,13 +3314,14 @@ function clientApp() {
   const readingNow = id => tts.on && tts.id === id;
   const inPlace = (id, key, plain) => readingNow(id) ? segSpans(sg => sg.key === key) || plain : plain;
   const parasIn = (id, pre, ps) => readingNow(id) ? ps.map((p, i) => { const s = segSpans(sg => sg.key === pre + i); return s ? "<p>" + s + "</p>" : p; }) : ps;
-  function refreshInPlace() { render(); renderDetail(); renderNews(); }
+  function refreshInPlace() { render(); renderDetail(); renderNews(); if (tts.kind === "article" && rdId && tts.id === rdId) renderReaderText(); }
   // The full article (read-aloud, Step 7): speaking starts in the tap, the article follows
   window.onArticleText = (id, r) => {
     const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l);
     if (!h || "art-" + h.l !== id) return;
     if (r.error) return toast(r.error);
-    speak(h.p || x.s, [{ id, title: h.t, paras: [{ key: "title", head: true, text: h.t }, { key: "from", text: "From " + h.p }].concat(r.paras.map((t, i) => ({ key: "p" + i, text: t }))) }], undefined, "article");
+    const paras = r.blocks ? articleParas(r.blocks) : r.paras.map((t, i) => ({ key: "x" + i, text: t }));
+    speak(h.p || x.s, [{ id, title: h.t, paras: [{ key: "title", head: true, text: h.t }, { key: "from", text: "From " + h.p }].concat(paras) }], undefined, "article");
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
   };
   // Flash: a queue the player starts on at once (inside the tap, so audio is allowed) and fills as digests arrive.
@@ -3281,6 +3382,169 @@ function clientApp() {
       if (d.note || d.error) toast(String(d.note || d.error).slice(0, 120));
       add(digestItem(x, d));
     }
+  }
+  // ---- the reader (read-aloud 1.1.0, Step 8): Stockit's news items, as the reader expects them ----
+  // A news item in the reader is "art-" + its link (the same id the Article button reads with, so both highlight the same text).
+  function byId(id) {
+    for (const x of S.stocks) for (const h of (x.news || [])) if ("art-" + h.l === id) return { id, title: h.t, link: h.l, pub: h.at, src: h.p, s: x.s };
+    return null;
+  }
+  const srcTitle = a => a.src || pageHost(a.link);
+  const rdHead = a => [{ key: "title", head: true, text: a.title }, { key: "from", text: "From " + srcTitle(a) }];   // reader.page.js calls it head(a)
+  const readerExtraTools = () => "";
+  // Article blocks → paragraphs to read: keyed b<i> so the reader can highlight its own text; code isn't read
+  const articleParas = blocks => blocks.map((b, i) => b.t === "pre" ? null : { key: "b" + i, text: b.text, head: b.t === "h" }).filter(Boolean);
+  // ── Reader: the post's own text inside Stockit, with Listen and questions to AI ──
+  let rdListenSoon = "";   // rdId and rdHold are declared in read-aloud.page.js
+  const STOP_SM = `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v10H7z"/></svg>`;
+  const pageHost = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return "the site"; } };
+  const rdData = {}, rdChat = {};
+  const RD_WHY = {
+    consent: ["This site asks for consent first", "It shows a consent screen before the article, and only you can answer it. Open the article to read it there."],
+    signin: ["This article needs you to sign in", "The site keeps it for subscribers or signed-in readers. Open the article to read it there."],
+    unreachable: ["The article couldn't be loaded", "The site didn't answer. Open the article to try it in Safari."],
+    unreadable: ["This page couldn't be read here", "Its text is built in a way Stockit can't read. Open the article to read it there."],
+  };
+  const RD_SUGG = ["What's the main point?", "What can I apply from this?", "Explain the key terms", "What's missing or debatable?"];
+  const rdReading = () => tts.on && tts.kind === "article" && !!rdId && tts.id === rdId;
+  function openReader(id) {
+    rdId = id; rdHold = 0;
+    const cached = rdData[id] && !rdData[id].loading;
+    if (!cached) rdData[id] = { loading: true };
+    send("reader", { id, cached });
+    renderReader();
+    $("#reader").scrollTop = 0;
+  }
+  window.onReader = (id, res) => {
+    rdData[id] = res;
+    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id) { readerSpeak(); } }
+    if (rdId === id) { renderReaderMeta(); renderReaderText(); renderReaderChat(); }
+  };
+  function renderReader() {
+    const el = $("#reader");
+    el.classList.toggle("open", !!rdId); lockBody();
+    if (!rdId) return;
+    const a = byId(rdId); if (!a) { rdId = ""; el.classList.remove("open"); return lockBody(); }
+    el.innerHTML = `<div class="sh-head rd-head"><span class="rd-src">${esc(srcTitle(a))}</span><button class="link" data-act="rdclose">Done</button></div>
+      <article class="rd-body">
+        <h1 class="rd-title">${esc(a.title)}</h1>
+        <p class="rd-meta" id="rdMeta"></p>
+        <div class="rd-tools" id="rdTools"></div>
+        <div id="rdText" class="rd-text"></div>
+        <section id="rdChat" class="rd-chat" aria-label="Questions about this article"></section>
+        <p class="rd-foot"><button class="link" data-act="rdorig">Read it on ${esc(pageHost(a.link))} ↗</button></p>
+      </article>`;
+    renderReaderMeta(); renderReaderTools(); renderReaderText(); renderReaderChat();
+  }
+  function renderReaderMeta() {
+    const a = byId(rdId), d = rdData[rdId] || {}, el = $("#rdMeta"); if (!a || !el) return;
+    el.textContent = [d.byline, rel(a.pub), d.minutes ? d.minutes + " min read" : ""].filter(Boolean).join(" · ");
+  }
+  function renderReaderTools() {
+    const a = byId(rdId), el = $("#rdTools"); if (!a || !el) return;
+    el.innerHTML = `<button class="lsbtn ${rdReading() ? "on" : ""}" data-act="rdlisten">${rdReading() ? `${STOP_SM}Stop listening` : `${SPK}Listen`}</button>
+      ${S.settings.hasKey ? `<button class="lsbtn" data-act="rdask">✦ Ask AI</button>` : ""}
+      <button class="lsbtn" data-act="rdorig" aria-label="Open the original article">Original ↗</button>
+      ${readerExtraTools(a)}`;
+  }
+  function renderReaderText() {
+    const el = $("#rdText"); if (!el) return;
+    const a = byId(rdId), d = rdData[rdId] || {};
+    if (d.loading) { el.innerHTML = `<p class="note rd-wait"><span class="busy-dot"></span> Getting the article from ${esc(pageHost(a.link))}…</p><div class="rd-skel"><i></i><i></i><i></i><i></i><i></i></div>`; return; }
+    if (d.blocked) {
+      const [h, p] = RD_WHY[d.blocked] || RD_WHY.unreadable;
+      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><button class="sm primary" data-act="rdorig">Open the article ↗</button></div>
+        ${d.excerpt ? `<h2 class="rd-h">From the feed</h2>${rdBlocks([{ t: "p", text: d.excerpt }], "x")}` : ""}`;
+      return;
+    }
+    el.innerHTML = (d.image ? `<img class="rd-img" src="${esc(d.image)}" alt="" loading="lazy" onerror="this.remove()">` : "") + rdBlocks(d.blocks || [], "b");
+  }
+  function rdBlocks(blocks, pre) {   // while this article is read, its sentences are spans that highlight and dim
+    const reading = rdReading();
+    let html = "", list = false;
+    blocks.forEach((b, i) => {
+      const plain = esc(b.text);
+      const txt = b.t === "pre" ? plain : reading ? (segSpans(sg => sg.k === 0 && sg.key === pre + i) || plain) : plain;
+      if (b.t === "li" && !list) { html += "<ul class=\"rd-ul\">"; list = true; }
+      if (b.t !== "li" && list) { html += "</ul>"; list = false; }
+      html += b.t === "h" ? `<h2 class="rd-h">${txt}</h2>` : b.t === "pre" ? `<pre class="rd-pre">${txt}</pre>` : b.t === "q" ? `<blockquote class="rd-q">${txt}</blockquote>` : b.t === "li" ? `<li>${txt}</li>` : `<p class="rd-p">${txt}</p>`;
+    });
+    return html + (list ? "</ul>" : "");
+  }
+  function readerParas() {
+    const d = rdData[rdId] || {};
+    return d.blocks ? articleParas(d.blocks) : d.excerpt ? [{ key: "x0", text: d.excerpt }] : null;
+  }
+  function readerSpeak() {
+    const a = byId(rdId), paras = readerParas(); if (!a || !paras) return;
+    speak(srcTitle(a), [{ id: a.id, title: a.title, paras: rdHead(a).concat(paras) }], undefined, "article");
+    if ((rdData[rdId] || {}).blocked) toast("Only the feed excerpt could be read");
+  }
+  function readerListen() {
+    if (rdReading()) { stopSpeaking(); renderReaderTools(); return; }
+    send("usage-listen", { kind: "article" });
+    if (readerParas()) return readerSpeak();
+    const a = byId(rdId);   // still loading: start speaking inside the tap, the article follows (iOS needs the tap)
+    rdListenSoon = rdId;
+    speak(srcTitle(a), [{ id: a.id, title: a.title, paras: [{ text: "Loading the article." }] }], undefined, "article");
+  }
+  function mdLite(t) {   // AI answers: paragraphs, "- " bullets and **bold**, everything else escaped
+    const inl = x => esc(x).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    return String(t || "").replace(/\r/g, "").split(/\n{2,}/).map(b => {
+      const lines = b.split("\n").filter(l => l.trim());
+      if (lines.length && lines.every(l => /^\s*[-*•]\s+/.test(l))) return "<ul>" + lines.map(l => "<li>" + inl(l.replace(/^\s*[-*•]\s+/, "")) + "</li>").join("") + "</ul>";
+      return "<p>" + lines.map(inl).join("<br>") + "</p>";
+    }).join("");
+  }
+  function renderReaderChat() {
+    const el = $("#rdChat"); if (!el) return;
+    const d = rdData[rdId] || {};
+    if (!S.settings.hasKey) { el.innerHTML = `<p class="note rd-nokey">✦ To ask questions about this article, add an AI key in <b>Settings › AI settings</b>.</p>`; return; }
+    if (d.loading) { el.innerHTML = ""; return; }
+    const keep = $("#rdQ") ? $("#rdQ").value : "";
+    const msgs = rdChat[rdId] || [];
+    el.innerHTML = `<h3 class="rd-chat-h">✦ Ask about this article</h3>
+      ${d.blocked ? `<p class="note">Only the feed excerpt could be read, so answers may be limited.</p>` : ""}
+      <div class="rd-msgs">${msgs.map((m, i) => `<div class="rd-qb">${esc(m.q)}</div>` + (m.pending ? `<div class="rd-ab wait"><span class="busy-dot"></span> Thinking…</div>`
+        : m.error ? `<div class="rd-ab err">${esc(m.error)} <button class="link" data-act="rdretry" data-v="${i}">Try again</button></div>`
+        : `<div class="rd-ab"><span class="ai-lbl">✦ AI answer by ${esc(PN[m.provider] || "AI")}</span>${mdLite(m.a)}</div>`)).join("")}</div>
+      ${msgs.length ? "" : `<div class="rd-sugg">${RD_SUGG.map(q => `<button class="chip" data-act="rdsugg" data-v="${esc(q)}">${esc(q)}</button>`).join("")}</div>`}
+      <div class="rd-ask"><textarea id="rdQ" rows="1" placeholder="Ask anything about this article" aria-label="Your question" maxlength="600" enterkeyhint="send"></textarea><button class="rd-send" data-act="rdsend" aria-label="Ask"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></button></div>`;
+    if (keep) $("#rdQ").value = keep;
+  }
+  function rdAsk(q) {
+    q = String(q || "").trim(); if (!q || !rdId) return;
+    const list = rdChat[rdId] = rdChat[rdId] || [];
+    if (list.some(m => m.pending)) return toast("One question at a time");
+    const hist = list.filter(m => m.a).slice(-6).map(m => ({ q: m.q, a: m.a }));
+    list.push({ q, pending: true });
+    send("askarticle", { id: rdId, q, hist });
+    if ($("#rdQ")) $("#rdQ").value = "";
+    renderReaderChat();
+    const w = document.querySelector("#rdChat .rd-ab.wait"); if (w && w.scrollIntoView) w.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  // the question box grows with what's typed, and the keyboard's Send key asks
+  document.addEventListener("input", e => { if (e.target.id === "rdQ") { e.target.style.height = "auto"; e.target.style.height = Math.min(120, e.target.scrollHeight) + "px"; } });
+  document.addEventListener("keydown", e => { if (e.target.id === "rdQ" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); rdAsk(e.target.value); } });
+  window.onAsk = (id, res) => {
+    const m = (rdChat[id] || []).find(x => x.pending); if (!m) return;
+    m.pending = false;
+    if (res.error) m.error = res.error; else { m.a = res.text; m.provider = res.provider; }
+    if (rdId === id) { renderReaderChat(); const all = document.querySelectorAll("#rdChat .rd-qb"), last = all[all.length - 1]; if (last && last.scrollIntoView) last.scrollIntoView({ block: "start", behavior: "smooth" }); }
+  };
+
+  function readerAct(act, t, e) {
+    const v = t.dataset.v;
+    switch (act) {
+      case "rdclose": rdId = ""; renderReader(); return true;
+      case "rdorig": send("open", { id: rdId, orig: true }); return true;
+      case "rdlisten": readerListen(); return true;
+      case "rdask": { const c = $("#rdChat"); if (c && c.scrollIntoView) c.scrollIntoView({ block: "start", behavior: "smooth" }); setTimeout(() => { const q = $("#rdQ"); if (q) q.focus(); }, 450); return true; }
+      case "rdsugg": rdAsk(v); return true;
+      case "rdsend": { const q = $("#rdQ"); if (q) rdAsk(q.value); return true; }
+      case "rdretry": { const list = rdChat[rdId] || [], m = list[+v]; if (m) { list.splice(+v, 1); rdAsk(m.q); } return true; }
+    }
+    return false;
   }
   const vseg = (k, opts) => `<div class="seg wide">${opts.map(([v, l]) => `<button class="${String(S.settings[k]) === String(v) ? "on" : ""}" data-act="voiceset" data-k="${k}" data-v="${v}">${l}</button>`).join("")}</div>`;
   function listenHTML() {
@@ -3459,7 +3723,7 @@ function clientApp() {
     }, 300);
     renderCheck();
   };
-  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen || raOpen)); }
+  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen || raOpen || !!rdId)); }
 
   // ---- interactions ----
   const shareText = (title, by, body) => `${title}\n\n${String(body || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")}\n\n✦ Written by ${PN[by] || by} in Stockit. Not financial advice.`;
@@ -3478,6 +3742,7 @@ function clientApp() {
     if (!t || t.disabled) return;
     const act = t.dataset.act, v = t.dataset.v;
     if (readAloudAct(act, t, e)) return;   // read aloud: player, text view and Settings › Listening
+    if (readerAct(act, t, e)) return;   // the reader: Done, Listen, Ask AI, Original
     switch (act) {
       case "tab": if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
@@ -3553,6 +3818,7 @@ function clientApp() {
         else { rmArmed = v; renderDetail(); setTimeout(() => { if (rmArmed === v) { rmArmed = null; renderDetail(); } }, 3500); }
         break;
       case "openlink": send("openlink", { v }); break;
+      case "rdopen": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l); if (h) openReader("art-" + h.l); break; }
       case "story": busyK.add("story:" + v); renderDetail(); send("story", { s: v }); break;
       case "briefing": busyK.add("briefing"); render(); send("briefing", {}); break;
       case "brieffull": briefFull = !briefFull; render(); break;
@@ -3795,7 +4061,7 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 .stepper input{width:86px;text-align:center;font:600 16px var(--sans);padding:7px 6px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .stepper .unit{font-size:calc(14px * var(--ts));color:var(--ink-2);min-width:2.5em}
 .stepper .range{flex-basis:100%;font-size:calc(12px * var(--ts));color:var(--muted)}
-/* Read aloud (app-blueprints · read-aloud 1.0.0): from snippets/read-aloud/read-aloud.css; Stockit's list is #main and its items .fl */
+/* Read aloud (app-blueprints · read-aloud 1.1.0): from snippets/read-aloud/read-aloud.css; Stockit's list is #main and its items .fl */
 .gh-listen{display:inline-flex;align-items:center;color:var(--signal);font-weight:600;font-size:calc(13.5px * var(--ts))}
 .listen{display:inline-flex;align-items:center;margin:0 0 18px;padding:9px 14px;border-radius:20px;background:var(--signal-wash);color:var(--signal);border:1.5px solid var(--signal);font-weight:700;font-size:calc(14.5px * var(--ts))}
 .tl-listen{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 4px}
@@ -3848,6 +4114,50 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 @keyframes eq{0%,100%{height:30%}50%{height:100%}}
 /* Reduce Motion: no bouncing bars, no sliding bar, no fading highlight */
 @media (prefers-reduced-motion: reduce){.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}}
+/* The reader (read-aloud 1.1.0): from snippets/read-aloud/reader.css */
+#reader{z-index:16}   /* Stockit: above the news sheet (12) it opens from */
+.rd-head{gap:12px}
+.rd-src{font-weight:700;color:var(--ink-2);font-size:calc(14px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.rd-body{max-width:680px;margin:0 auto;padding:18px 20px 160px}
+.rd-title{font:800 calc(26px * var(--ts))/1.25 var(--display);margin:4px 0 8px;letter-spacing:-.01em}
+.rd-meta{color:var(--muted);font-size:calc(13.5px * var(--ts));margin:0 0 14px}
+.rd-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px;padding-bottom:16px;border-bottom:1px solid var(--rule)}
+.rd-tools .lsbtn.on{background:var(--amber-wash);color:var(--amber);border-color:var(--amber)}
+.rd-pin{margin-left:auto}
+.rd-pin .pinbtn{width:40px;height:34px;margin:0}
+.rd-img{display:block;width:100%;max-height:300px;object-fit:cover;border-radius:12px;margin:0 0 18px;background:var(--sheet)}
+.rd-p,.rd-ul li,.rd-q{font-size:calc(18px * var(--ts));line-height:1.7;color:var(--ink)}
+html[data-font=serif] .rd-p,html[data-font=serif] .rd-ul li,html[data-font=serif] .rd-q{font-family:var(--serif)}
+.rd-p{margin:0 0 16px}
+.rd-h{font:700 calc(21px * var(--ts))/1.3 var(--display);margin:26px 0 10px}
+.rd-ul{margin:0 0 16px;padding-left:22px}
+.rd-ul li{margin:0 0 6px}
+.rd-q{margin:0 0 16px;padding:2px 0 2px 16px;border-left:3px solid var(--rule);color:var(--ink-2);font-style:italic}
+.rd-pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:12px;margin:0 0 16px;overflow-x:auto;white-space:pre;color:var(--ink-2)}
+.rd-wait{display:flex;align-items:center;gap:8px}
+.rd-skel i{display:block;height:14px;margin:14px 0;border-radius:7px;background:var(--rule);opacity:.55}
+.rd-skel i:nth-child(3n){width:72%}
+.rd-blocked{background:var(--amber-wash);border:1px solid var(--amber);border-radius:14px;padding:16px;margin:0 0 20px}
+.rd-blocked b{display:block;font-size:calc(17px * var(--ts));margin-bottom:4px}
+.rd-blocked p{margin:0 0 12px;color:var(--ink-2)}
+.rd-chat{margin-top:30px;padding-top:20px;border-top:1px solid var(--rule)}
+.rd-chat-h{font:700 calc(18px * var(--ts))/1.3 var(--display);margin:0 0 12px}
+.rd-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.rd-qb{align-self:flex-end;max-width:85%;background:var(--signal);color:var(--paper);padding:9px 13px;border-radius:16px 16px 4px 16px;font-size:calc(15px * var(--ts));white-space:pre-wrap}
+.rd-ab{align-self:flex-start;max-width:100%;background:var(--sheet);border:1px solid var(--rule);padding:10px 14px;border-radius:16px 16px 16px 4px;font-size:calc(15.5px * var(--ts));line-height:1.55}
+.rd-ab p{margin:0 0 8px}.rd-ab p:last-child{margin:0}
+.rd-ab ul{margin:0 0 8px;padding-left:20px}
+.rd-ab .ai-lbl{display:block;font-size:calc(12px * var(--ts));font-weight:700;color:var(--signal);margin-bottom:4px}
+.rd-ab.wait{display:flex;align-items:center;gap:8px;color:var(--muted)}
+.rd-ab.err{color:var(--danger)}
+.rd-sugg{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.rd-sugg .chip{padding:7px 12px;border-radius:16px;border:1.5px solid var(--rule);background:var(--sheet);color:var(--ink-2);font-size:calc(14px * var(--ts));font-weight:600}
+.rd-ask{display:flex;align-items:flex-end;gap:8px;background:var(--sheet);border:1.5px solid var(--rule);border-radius:22px;padding:5px 5px 5px 14px}
+.rd-ask textarea{flex:1;border:0;background:transparent;color:var(--ink);font:16px/1.4 var(--sans);resize:none;padding:7px 0;min-height:22px;max-height:120px;outline:none}
+.rd-send{width:36px;height:36px;border-radius:18px;display:grid;place-items:center;flex:none;background:var(--signal);color:var(--paper)}
+.rd-send svg{width:20px;height:20px}
+.rd-nokey{margin-top:30px}
+.rd-foot{margin-top:26px;text-align:center;font-size:calc(14px * var(--ts))}
 .cfgin.wide{display:block;width:100%;margin-top:8px;font:16px/1.45 var(--sans);padding:9px 11px;border-radius:9px;border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
 .cfgin:focus{outline:2px solid var(--signal);outline-offset:-1px}
 .cfg-foot{margin-top:18px}
@@ -4276,6 +4586,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
 <div id="newssheet" class="sheet" aria-label="TL;DR"></div>
 <div id="checksheet" class="sheet" aria-label="Check my portfolio"></div>
+<div id="reader" class="sheet" aria-label="Reader"></div>
 <div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">
   <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>

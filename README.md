@@ -281,7 +281,8 @@ Tap a headline to open its **TL;DR**:
 
 - **The gist** in one sentence, **the story** in two or three paragraphs, the **key facts** and **what it could mean** for the stock.
 - **✦ AI summary** when you have a key, labelled with the provider. Without a key, Stockit picks the key sentences from the article itself, labelled **no AI**.
-- **Listen to TL;DR** reads the summary aloud, highlighting each sentence as it goes; **Article** reads the whole original article (it starts speaking at once, and falls back to the excerpt if the page can't be read). **Read the full article at …** opens the original at the publisher.
+- **Listen to TL;DR** reads the summary aloud, highlighting each sentence as it goes; **Article** reads the whole original article (it starts speaking at once, and falls back to the summary if the page can't be read).
+- **Read the full article** opens it in Stockit's **reader**: the article's own text with its picture, author and reading time, **Listen** (the text lights up as it's read), and **✦ Ask AI** with suggested questions ("What's the main point?"). When a site asks for consent or a sign-in first, the reader says so and offers the original; **Original ↗** opens it at the publisher. To open articles in Safari instead, switch off **Settings › News and signals › Open articles in the reader**.
 - **More about** the same stock is listed underneath, one tap away.
 
 Google News links are followed to the publisher's own article. Some articles still can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
@@ -390,7 +391,7 @@ The software is provided "as is", without warranty of any kind; see the [LICENSE
 
 ## Privacy and security
 
-- **Anonymous usage, only if you agree.** A one-time question (and **Settings › Privacy › Share anonymous usage**) decides whether Stockit sends anonymous counts to PostHog's US cloud: app opens, how many stocks were added, briefings, stories and ideas made, portfolio checks, strategies saved and listening, the app version and a few display settings (including whether privacy mode is on). Each event carries a random install ID made on your phone, not linked to anything else. Never sent: tickers, company names, prices, amounts, positions, strategies or screenshots. Turning it off stops sending and deletes the install ID.
+- **Anonymous usage, only if you agree.** A one-time question (and **Settings › Privacy › Share anonymous usage**) decides whether Stockit sends anonymous counts to PostHog's US cloud: app opens, how many stocks were added, briefings, stories and ideas made, portfolio checks, strategies saved, listening, articles opened in the reader and questions asked about them, the app version and a few display settings (including whether privacy mode is on). Each event carries a random install ID made on your phone, not linked to anything else. Never sent: tickers, company names, prices, amounts, positions, strategies, screenshots, articles or your questions. Turning it off stops sending and deletes the install ID.
 
 - **Everything runs on your phone.** There is no Stockit server, and nothing is collected unless you agree to the anonymous usage counts below.
 - **Your data** (stocks, shares, average prices, settings, loaded prices and headlines, AI texts) is stored as JSON in **iCloud Drive › Scriptable › Stockit**. The widget's snapshot stays on the device.
