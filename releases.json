@@ -4,6 +4,35 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.18.0",
+      "date": "2026-11-01",
+      "title": "Read it here",
+      "highlights": [
+        {
+          "icon": "📖",
+          "title": "Articles inside Stockit",
+          "text": "Read the full article opens its own text here, with the picture, author and reading time."
+        },
+        {
+          "icon": "✦",
+          "title": "Ask about any article",
+          "text": "Ask AI answers questions about the article, with suggestions to start."
+        },
+        {
+          "icon": "🎧",
+          "title": "Listen and follow along",
+          "text": "Listen in the reader lights up each sentence as it's read."
+        }
+      ],
+      "changes": [
+        "Read aloud 1.1.0: the reader for news articles, with Listen, ✦ Ask AI and Original ↗; consent and sign-in pages say so and offer the original",
+        "Article reads the same text the reader shows",
+        "Settings › News and signals › Open articles in the reader (off: Safari)",
+        "Anonymous usage (if on) also counts articles opened in the reader and questions asked, never the article or the question"
+      ],
+      "fixes": []
+    },
+    {
       "version": "1.17.0",
       "date": "2026-10-31",
       "title": "Hear it, follow it",

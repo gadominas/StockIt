@@ -2,6 +2,19 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.18.0 (2026-11-01): Read it here
+
+- 📖 **Articles inside Stockit**: Read the full article opens its own text here, with the picture, author and reading time.
+- ✦ **Ask about any article**: Ask AI answers questions about the article, with suggestions to start.
+- 🎧 **Listen and follow along**: Listen in the reader lights up each sentence as it's read.
+
+**Changes**
+
+- Read aloud 1.1.0: the reader for news articles, with Listen, ✦ Ask AI and Original ↗; consent and sign-in pages say so and offer the original
+- Article reads the same text the reader shows
+- Settings › News and signals › Open articles in the reader (off: Safari)
+- Anonymous usage (if on) also counts articles opened in the reader and questions asked, never the article or the question
+
 ## 1.17.0 (2026-10-31): Hear it, follow it
 
 - 🎧 **Know what's playing**: The player names what it reads — story, TL;DR, full article or headlines — and shows the time left.
