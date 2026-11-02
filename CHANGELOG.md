@@ -2,6 +2,20 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.0 (2026-11-02): Today's session, and the one before
+
+- ⏱ **This session, per stock**: Each position shows what it made or lost since its market's last close, in your currency.
+- 🕰 **The session before**: Under it, smaller and dimmed: the result of the previous session.
+- 🌍 **Market by market**: Before a market opens, its stocks say so instead of showing yesterday as today.
+
+**Changes**
+
+- Every owned stock shows This session (or Today, once its market has closed) with the money it made or lost and the percentage, in your currency
+- Under it, in smaller dimmed text: Previous session with its money and percentage, worked out from the daily closes
+- Before a stock's market opens, it shows Today: not traded yet, opens in …, and its last session's result as the previous session
+- The portfolio summary adds up this session across your markets, says how many stocks haven't traded yet today, and shows the previous session dimmed; on days no market opens it says so
+- Both hide in privacy mode
+
 ## 1.18.0 (2026-11-01): Read it here
 
 - 📖 **Articles inside Stockit**: Read the full article opens its own text here, with the picture, author and reading time.

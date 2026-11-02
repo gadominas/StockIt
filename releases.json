@@ -4,6 +4,35 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.19.0",
+      "date": "2026-11-02",
+      "title": "Today's session, and the one before",
+      "highlights": [
+        {
+          "icon": "⏱",
+          "title": "This session, per stock",
+          "text": "Each position shows what it made or lost since its market's last close, in your currency."
+        },
+        {
+          "icon": "🕰",
+          "title": "The session before",
+          "text": "Under it, smaller and dimmed: the result of the previous session."
+        },
+        {
+          "icon": "🌍",
+          "title": "Market by market",
+          "text": "Before a market opens, its stocks say so instead of showing yesterday as today."
+        }
+      ],
+      "changes": [
+        "Every owned stock shows This session (or Today, once its market has closed) with the money it made or lost and the percentage, in your currency",
+        "Under it, in smaller dimmed text: Previous session with its money and percentage, worked out from the daily closes",
+        "Before a stock's market opens, it shows Today: not traded yet, opens in …, and its last session's result as the previous session",
+        "The portfolio summary adds up this session across your markets, says how many stocks haven't traded yet today, and shows the previous session dimmed; on days no market opens it says so",
+        "Both hide in privacy mode"
+      ]
+    },
+    {
       "version": "1.18.0",
       "date": "2026-11-01",
       "title": "Read it here",
