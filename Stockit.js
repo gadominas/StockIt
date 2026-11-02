@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.18.0';
+const VERSION = '1.19.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -2461,6 +2461,38 @@ function clientApp() {
       <div class="rows">${sortRows(items).map(row).join("")}</div>`;
   }
   // What you put into a position and what it has made or lost, in your currency (the price paid at today's rate).
+  // A position's result in its market's current session, and in the session before, in your currency.
+  // Before a market opens, its "today" from Yahoo is really the last session: it's shown as that, and the
+  // current session as not started yet. Earlier sessions come from the daily closes.
+  function sess(x) {
+    if (x.price == null || x.prev == null) return null;
+    const mk = mktOf(x), now = Date.now(), st = mk ? mktStatus(mk, x.tp) : null;
+    let live = true, day = null;
+    if (mk && !mk.always) {
+      const zn = zoned(now, mk.tz), zt = zoned(x.mt || now, mk.tz);
+      live = !!(st && st.open) || (zt.y === zn.y && zt.mo === zn.mo && zt.d === zn.d);
+      day = Math.floor(Date.UTC(zt.y, zt.mo - 1, zt.d) / 864e5);
+    }
+    let prev = null, prevPct = null;
+    if (live) {
+      const before = (x.pts || []).filter(p => day == null || p[0] < day);
+      if (before.length >= 2) { const c1 = before[before.length - 1][1], c0 = before[before.length - 2][1]; prev = c1 - c0; prevPct = c0 ? (c1 / c0 - 1) * 100 : null; }
+    } else { prev = x.price - x.prev; prevPct = x.prev ? (x.price / x.prev - 1) * 100 : null; }
+    const own = x.list === "own" && x.sh > 0, r = fxr(x.cur);
+    const cur = live ? x.price - x.prev : null;
+    return { live, open: !!(st && (st.open || st.always)), opensAt: st && st.opensAt, mk,
+      cur, curPct: live && x.prev ? (x.price / x.prev - 1) * 100 : null, prev, prevPct,
+      curM: own && live ? (dayHome(x) != null ? dayHome(x) : x.sh * cur) : null, prevM: own && prev != null ? x.sh * prev * (r != null ? r : 1) : null, mcur: r != null ? HOME() : x.cur };
+  }
+  const sgn = (v, cur) => v == null ? "—" : (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, Math.abs(v) >= 10000, Math.abs(v) >= 10000 ? null : Math.abs(v) < 10 ? 2 : 0);
+  function sessionLines(x) {
+    const q = sess(x);
+    if (!q || x.list !== "own" || !(x.sh > 0)) return "";
+    const now = q.live ? `<small class="r-day">${q.open ? "This session" : "Today"} <b class="${cls(q.curM)}">${P(sgn(q.curM, q.mcur))}</b> <span class="${cls(q.curPct)}">${pct(q.curPct)}</span></small>`
+      : `<small class="r-day muted">Today: not traded yet${q.opensAt ? ", opens in " + dur(q.opensAt - Date.now()) : ""}</small>`;
+    const before = q.prevM != null ? `<small class="r-prev">Previous session ${P(sgn(q.prevM, q.mcur))} (${pct(q.prevPct)})</small>` : "";
+    return now + before;
+  }
   function investedLine(x) {
     if (x.list !== "own" || !x.sh || !x.cost || x.price == null) return "";
     const inv = inHome(x.sh * x.cost, x.cur), val = posHome(x), cur = inv != null && val != null ? HOME() : x.cur;
@@ -2474,9 +2506,20 @@ function clientApp() {
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
     return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
-      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${investedLine(x)}${mkBadge(x)}</div>
+      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${sessionLines(x)}${investedLine(x)}${mkBadge(x)}</div>
       ${spark((x.pts || []).slice(-23), c)}
       <div class="r-r"><b>${money(x.price, x.cur)}</b><span class="pill ${c}">${pct(d)}</span></div>${sig}</div>`;
+  }
+  function sumSessions(items, t, dp) {
+    const qs = items.filter(x => x.list === "own" && x.sh > 0).map(x => [x, sess(x)]).filter(o => o[1]);
+    const exact = t.cur === HOME() && qs.length && qs.every(([x]) => fxr(x.cur) != null);
+    if (!exact) return `<div class="sum-d ${cls(t.day)}">${P(signed(t.day, t.cur))} (${pct(dp)}) today</div>`;
+    const cur = qs.reduce((a, [, q]) => a + (q.curM || 0), 0), prev = qs.reduce((a, [, q]) => a + (q.prevM || 0), 0);
+    const nLive = qs.filter(([, q]) => q.live).length, nOpen = qs.filter(([, q]) => q.open).length;
+    const base = t.value - cur, prevBase = t.value - cur - prev;
+    return `${nLive ? `<div class="sum-d ${cls(cur)}">${P(signed(cur, t.cur))} (${pct(base ? cur / base * 100 : null)}) ${nOpen ? "this session" : "today"}</div>` : `<div class="sum-d muted">Today: your markets haven't opened yet</div>`}
+      ${nLive && nLive < qs.length ? `<div class="sum-n">${qs.length - nLive} of your ${qs.length} stocks haven't traded yet today</div>` : ""}
+      <div class="sum-p">Previous session ${P(signed(prev, t.cur))} (${pct(prevBase ? prev / prevBase * 100 : null)})</div>`;
   }
   function summaryHTML(items) {
     if (!items.length) return "";
@@ -2493,7 +2536,7 @@ function clientApp() {
     const shown = vals.slice(0, 6), rest = vals.slice(6).reduce((a, b) => a + b[1], 0);
     if (rest > 0) shown.push(["Other", rest]);
     return `<section class="sum">${checkIcon()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${P(money(t.value, t.cur))}</div>
-      <div class="sum-d ${cls(t.day)}">${P(signed(t.day, t.cur))} (${pct(dp)}) today</div>
+      ${sumSessions(items, t, dp)}
       ${t.costKnown && t.cost ? `<div class="sum-g">${P(signed(t.value - t.cost, t.cur))} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
       ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => P(money(z.value, z.cur))).join(" and ")} until their exchange rates load</p>` : ""}
       ${t.mixed ? `<p class="note">Stocks in other currencies at today's exchange rates. Change the currency in <button class="link small" data-act="cfgopen">Settings › Portfolio</button>.</p>` : ""}
@@ -4505,6 +4548,11 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .brief.folded .sigcount{margin-top:8px}
 .r-l .r-pl{display:block;font-size:calc(12.5px * var(--ts));color:var(--muted);margin-top:1px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
 .r-pl .up,.r-pl .down{font-weight:700}
+.r-l .r-day{display:block;font-size:calc(13px * var(--ts));color:var(--ink-2);margin-top:2px;white-space:normal;overflow:visible;text-overflow:clip}
+.r-l .r-day b{font-weight:700}
+.r-l .r-prev{display:block;font-size:calc(11.5px * var(--ts));color:var(--muted);opacity:.75;margin-top:1px;white-space:normal;overflow:visible;text-overflow:clip}
+.sum-n{font-size:calc(12.5px * var(--ts));color:var(--muted);margin-top:1px}
+.sum-p{font-size:calc(13px * var(--ts));color:var(--muted);opacity:.75;margin-top:2px}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
