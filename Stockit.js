@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.4';
+const VERSION = '1.19.5';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -51,13 +51,14 @@ const KC_INSTALL = 'stockit-install-id';
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
   { id: 'in-app-updates', name: 'In-app updates', version: '1.0.0', since: '1.0.0' },
-  { id: 'settings', name: 'Settings', version: '1.1.0', since: '1.15.0' },
+  { id: 'settings', name: 'Settings', version: '1.1.1', since: '1.19.5' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.2.0', since: '1.18.0' },
+  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.0', since: '1.19.5' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.3', since: '1.19.5' },
 ];
 
 // ---------- config ----------
@@ -205,7 +206,9 @@ function rsi14(pts) {
 // ---------- end pure helpers ----------
 
 // ---------- storage ----------
-const fm = (() => { try { return FileManager.iCloud(); } catch (e) { return FileManager.local(); } })();
+// iCloud Drive when the phone is signed in to iCloud, otherwise the phone itself.
+// FileManager.iCloud() itself never fails; asking it for its folder does, so ask inside the try.
+const fm = (() => { try { const ic = FileManager.iCloud(); ic.documentsDirectory(); return ic; } catch (e) { return FileManager.local(); } })();
 const DIR = fm.joinPath(fm.documentsDirectory(), APP);
 if (!fm.fileExists(DIR)) fm.createDirectory(DIR, true);
 const P = n => fm.joinPath(DIR, n + ".json");
@@ -3318,13 +3321,34 @@ function clientApp() {
   const LEGACY_TTS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
   const aiTTS = () => S.settings.speechEngine === "ai" && S.settings.hasOpenAI;
   const au = new Audio(); au.preload = "auto"; au.setAttribute("playsinline", "");
-  const SILENT = (() => {   // 0.1 s of silence as a WAV, to unlock audio inside the tap
-    const n = 800, buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
+  // ── Sound with the Ring/Silent switch on (app-blueprints · audio-playback 1.0.0) ──
+  // iOS mutes a page's sound while the switch is on, unless the page plays media. While the app is making sound
+  // the user asked for, it declares itself a media player (navigator.audioSession, iOS 17+); for speech and
+  // Web Audio a looping second of silence does the same on older iOS. Start inside a tap; stop with the sound.
+  const silentWav = secs => {   // silence as an 8 kHz WAV data URI
+    const n = Math.round(8000 * secs), buf = new Uint8Array(44 + n), dv = new DataView(buf.buffer);
     const w = (o, t) => { for (let i = 0; i < t.length; i++) buf[o + i] = t.charCodeAt(i); };
     w(0, "RIFF"); dv.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
     dv.setUint32(24, 8000, true); dv.setUint32(28, 8000, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true); w(36, "data"); dv.setUint32(40, n, true); buf.fill(128, 44);
     let str = ""; buf.forEach(b => { str += String.fromCharCode(b); }); return "data:audio/wav;base64," + btoa(str);
-  })();
+  };
+  const keepAwake = new Audio(); keepAwake.loop = true; keepAwake.setAttribute("playsinline", "");
+  let keepSrc = "", audioOffT = null;
+  // kind: "speech" (Web Speech), "webaudio" (an AudioContext), "media" (the sound is an <audio> element itself:
+  // iOS plays one media element at a time, so no silence loop next to it)
+  function audioOn(kind) {
+    clearTimeout(audioOffT);
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
+    if (kind === "media") return;
+    try { if (!keepSrc) keepAwake.src = keepSrc = silentWav(1); const p = keepAwake.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {}
+  }
+  function audioOff() {   // other apps' music can play again
+    clearTimeout(audioOffT);
+    try { keepAwake.pause(); } catch (e) {}
+    try { if (navigator.audioSession) navigator.audioSession.type = "auto"; } catch (e) {}
+  }
+  function audioOffSoon(ms) { clearTimeout(audioOffT); audioOffT = setTimeout(audioOff, ms); }   // sounds that come and go (games, timers)
+  const SILENT = silentWav(0.1);   // to unlock audio inside the tap
   function unlockAudio() { try { au.src = SILENT; const p = au.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} }
   function aiFetch(part) {
     if (part.audio) return Promise.resolve(part.audio);
@@ -3369,6 +3393,7 @@ function clientApp() {
     }
     stopSpeaking(true);
     if (ai) unlockAudio();   // has to happen inside the tap, before any waiting
+    audioOn(ai ? "media" : "speech");   // plays with the Ring/Silent switch on, too (audio-playback)
     tts.engine = ai ? "ai" : "device";
     tts.items = items; tts.label = label; tts.i = 0; tts.paused = false; tts.on = true;
     tts.kind = kind || ""; tts.id = (items[0] && items[0].id) || ""; tts.nowSeg = -1;
@@ -3397,14 +3422,14 @@ function clientApp() {
     if (SYN) SYN.cancel();
     document.querySelectorAll(".rs-now,.rs-done").forEach(el => el.classList.remove("rs-now", "rs-done"));
     tts.nowSeg = -1;
-    if (!quiet) { renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
+    if (!quiet) { audioOff(); renderPlayer(); if (raOpen) { raOpen = false; renderReadAlong(); } }
   }
   function togglePause() {
     if (!tts.on) return;
     if (tts.engine === "ai") {
       if (tts.paused) { tts.paused = false; if (!tts.loading) { const pr = au.play(); if (pr && pr.catch) pr.catch(() => {}); } }
       else { tts.paused = true; au.pause(); }
-    } else if (tts.paused) { SYN.resume(); tts.paused = false; } else { SYN.pause(); tts.paused = true; }
+    } else if (tts.paused) { audioOn("speech"); SYN.resume(); tts.paused = false; } else { SYN.pause(); try { keepAwake.pause(); } catch (e) {} tts.paused = true; }
     renderPlayer();
   }
   function skipItem() {
@@ -3540,7 +3565,8 @@ function clientApp() {
   window.onArticleText = (id, r) => {
     const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l);
     if (!h || "art-" + h.l !== id) return;
-    if (r.error) return toast(r.error);
+    if (!(tts.on && tts.kind === "article" && tts.id === id)) return;   // stopped (or something else started) while it loaded
+    if (r.error) { stopSpeaking(); return toast(r.error); }
     const paras = r.blocks ? articleParas(r.blocks) : r.paras.map((t, i) => ({ key: "x" + i, text: t }));
     speak(h.p || x.s, [{ id, title: h.t, paras: [{ key: "title", head: true, text: h.t }, { key: "from", text: "From " + h.p }].concat(paras) }], undefined, "article");
     if (r.partial) toast("The full page couldn't be read, so this is the excerpt");
@@ -3561,6 +3587,7 @@ function clientApp() {
     }
     stopSpeaking(true);
     if (ai) unlockAudio();
+    audioOn(ai ? "media" : "speech");   // plays with the Ring/Silent switch on, too (audio-playback)
     const ses = Date.now() + Math.random();
     Object.assign(tts, { engine: ai ? "ai" : "device", items: [], label, i: 0, paused: false, on: true, parts: [], segs: [], total: 0, pos: 0, kind: "summaries", id: "", nowSeg: -1, waiting: n, idle: true, loading: true, ses });
     renderPlayer();
@@ -3638,7 +3665,7 @@ function clientApp() {
   }
   window.onReader = (id, res) => {
     rdData[id] = res;
-    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id) { readerSpeak(); } }
+    if (rdListenSoon === id) { rdListenSoon = ""; if (rdId === id && tts.on && tts.kind === "article" && tts.id === id) readerSpeak(); }   // not if stopped meanwhile
     if (rdId === id) { renderReaderMeta(); renderReaderText(); renderReaderChat(); }
   };
   function renderReader() {
