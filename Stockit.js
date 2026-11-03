@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.0';
+const VERSION = '1.19.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -264,6 +264,7 @@ const settings = Object.assign(
     speechEngine: "device", voiceURI: "", voiceRate: 1, voicePitch: 1, voiceGender: "all",   // Listening: iPhone voice
     ttsModel: "gpt-4o-mini-tts", ttsVoice: "coral", ttsInstructions: "",                    // Listening: ✦ AI voice (OpenAI)
     checkUpdates: true,   // offer new versions from GitHub (asks again 2 days after "Later")
+    readerProxy: true,    // pages that block apps (Yahoo's consent wall, script-only sites) are read through Jina Reader (r.jina.ai)
     openInReader: true,   // read aloud 1.1.0: a headline's full article opens in Stockit's reader (off: Safari)
     shareUsage: false, usageAsked: false,  // anonymous usage counts: off until the person agrees
     theme: "auto", density: "comfortable", font: "sans", textSize: 1,           // Appearance
@@ -1056,15 +1057,19 @@ async function readerArticle(n) {   // { blocks, image, byline, words, minutes }
   let r;
   try { r = await articleHTML(n.l); }
   catch (e) {
-    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1];
+    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1], px = await proxyRead(n.l);
+    if (px) { readerCache[n.l] = px.blocks.map(b => b.text).join("\n\n"); return px; }
     return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable" };
   }
-  if (!r || !r.html) return { blocked: "unreachable" };
+  const viaProxy = async () => { const px = await proxyRead((r && r.url && !/consent|guce/i.test(r.url) ? r.url : n.l)); if (px) readerCache[n.l] = px.blocks.map(b => b.text).join("\n\n"); return px; };
+  if (!r || !r.html) return (await viaProxy()) || { blocked: r && /consent|guce/i.test(r.url || "") ? "consent" : "unreachable" };
   const rd = extractReader(r.html);
   if (rd.words >= 120) {
     readerCache[n.l] = rd.blocks.filter(b => b.t !== "pre").map(b => b.text).join("\n\n");
     return rd;
   }
+  const px = await viaProxy();
+  if (px) return Object.assign({ image: rd.image, byline: rd.byline }, px);
   const html = r.html;
   const why = /subscribe to (continue|read)|subscribers?[- ]only|paywall|(sign|log) in to (continue|read)|create a (free )?account to/i.test(html) ? "signin"
     : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
@@ -1102,26 +1107,85 @@ function extractArticle(html) {
   return { desc, paras, text, words: text ? text.split(/\s+/).length : 0 };
 }
 // Yahoo asks visitors in Europe for cookie consent before showing an article. Stockit answers the consent form once
-// (the same choice as tapping "Accept all") and keeps the cookies it gets, so later articles load directly.
-let consentRun = null;
+// (the same choice as tapping "Accept all"), copies the consent to Yahoo's sites as Yahoo's own page does, and keeps
+// the cookies, so later articles load directly. Scriptable's JavaScript has no URL, setTimeout or fetch: plain code only.
+let consentRun = null, consentAt = 0;
+const absUrl = (href, base) => {   // a link on a page, made absolute (no URL class in Scriptable)
+  if (!href) return base;
+  if (/^https?:\/\//i.test(href)) return href;
+  const origin = (String(base).match(/^https?:\/\/[^/]+/i) || [""])[0];
+  if (href.startsWith("//")) return "https:" + href;
+  if (href.startsWith("/")) return origin + href;
+  return String(base).replace(/[?#].*$/, "").replace(/[^/]*$/, "") + href;
+};
+const unq = v => String(v || "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#x2F;/gi, "/").replace(/&#47;/g, "/");
+function keepCookies(resp, jar) {
+  for (const c of (resp && resp.cookies) || []) if (c && c.name && /yahoo/i.test(c.domain || "yahoo.com")) jar[c.name] = c.value;
+}
 async function yahooConsent(html, pageUrl) {
   const form = (html.match(/<form[^>]*method="post"[\s\S]*?<\/form>/i) || [])[0];
-  if (!form) return false;
-  const action = new URL((form.match(/action="([^"]*)"/i) || [])[1] || pageUrl, pageUrl).toString();
-  const fields = [];
+  if (!form) { console.log("Yahoo consent: no form on " + pageUrl); return false; }
+  const action = absUrl(unq((form.match(/action="([^"]*)"/i) || [])[1]), pageUrl);
+  const fields = {};
   for (const inp of form.match(/<input[^>]+>/gi) || []) {
-    const name = (inp.match(/name="([^"]+)"/i) || [])[1], val = (inp.match(/value="([^"]*)"/i) || [])[1] || "";
-    if (name && /type="hidden"/i.test(inp)) fields.push(encodeURIComponent(name) + "=" + encodeURIComponent(val.replace(/&amp;/g, "&")));
+    const name = (inp.match(/name="([^"]+)"/i) || [])[1], val = unq((inp.match(/value="([^"]*)"/i) || [])[1] || "");
+    if (name && /type="hidden"/i.test(inp)) fields[name] = val;
   }
-  fields.push("agree=agree", "agree=agree");
+  const sessionId = fields.sessionId || (pageUrl.match(/[?&]sessionId=([^&#]+)/) || [])[1] || "";
+  if (!fields.consentUUID) fields.consentUUID = "default";
+  if (!fields.namespace) fields.namespace = "yahoo";
+  const body = Object.entries(fields).map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).concat(["agree=agree", "agree=agree"]).join("&");
+  const jar = {};
   const r = new Request(action);
   r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
-  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded" };
-  r.body = fields.join("&");
+  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded", "Referer": pageUrl };
+  r.body = body;
   await r.loadString();
-  const jar = ((r.response && r.response.cookies) || []).filter(c => c && c.name && /yahoo/i.test(c.domain || "yahoo")).map(c => c.name + "=" + c.value);
-  if (jar.length) { settings.yahooCookie = jar.join("; "); write("settings", settings); }
+  keepCookies(r.response, jar);
+  if (sessionId) {   // as Yahoo's page does next: copy the consent to its other sites, which sets the cookies articles need
+    const g = new Request(`https://guce.yahoo.com/copyConsent?sessionId=${encodeURIComponent(sessionId)}`);
+    g.timeoutInterval = cfg("fetchTimeout");
+    g.headers = { "User-Agent": cfg("userAgent"), "Referer": action };
+    try { await g.loadString(); keepCookies(g.response, jar); } catch (e) { console.log("Yahoo copyConsent: " + e); }
+  }
+  const names = Object.keys(jar);
+  startLog(`Yahoo consent answered: ${names.length ? names.join(", ") : "no cookies returned"}`);
+  if (names.length) { settings.yahooCookie = names.map(k => k + "=" + jar[k]).join("; "); write("settings", settings); consentAt = Date.now(); }
   return true;
+}
+// Pages that won't open from the phone (a consent wall that can't be answered, pages built by scripts, apps blocked)
+// are read through Jina Reader (r.jina.ai), which opens the page on its own servers and returns its text.
+// Only the article's public address is sent; Settings › News and signals turns it off.
+const proxyCache = {};
+async function proxyRead(url) {
+  if (settings.readerProxy === false || !/^https?:\/\//i.test(url)) return null;
+  if (proxyCache[url] !== undefined) return proxyCache[url];
+  try {
+    const r = new Request("https://r.jina.ai/" + url);
+    r.timeoutInterval = Math.max(20, cfg("fetchTimeout"));
+    r.headers = { "Accept": "text/plain", "X-Return-Format": "markdown", "User-Agent": cfg("userAgent") };
+    const txt = await r.loadString(), code = r.response ? r.response.statusCode : 0;
+    if (code >= 400 || !txt) throw new Error("HTTP " + code);
+    const md = (txt.split(/\nMarkdown Content:\s*\n/)[1] || txt).trim();
+    const title = (txt.match(/^Title:\s*(.+)$/m) || [])[1] || "";
+    const blocks = [];
+    const clean = t => plain(t.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`]{1,3}([^*_`]+)[*_`]{1,3}/g, "$1")).replace(/\s+/g, " ").trim();
+    const links = t => (t.match(/\]\(/g) || []).length;
+    for (const raw of md.split(/\n\s*\n/)) {
+      for (const line0 of raw.split(/\n(?=\s*(?:[-*+]|\d+\.)\s)/)) {
+        const line = line0.trim(), t = clean(line.replace(/^#{1,6}\s+|^>\s?|^[-*+]\s+|^\d+\.\s+/gm, ""));
+        if (!t || /^(advertisement|story continues|view comments|recommended stories|terms and privacy policy)/i.test(t)) continue;
+        if (links(line) >= 3 && links(line) * 40 > t.length) continue;   // a block of links: navigation
+        if (/^#{1,6}\s/.test(line)) { if (t.length > 2 && t.length < 120) blocks.push({ t: "h", text: t }); }
+        else if (/^[-*+]\s|^\d+\.\s/.test(line)) { if (t.length >= 15 && !/^\[[^\]]*\]\([^)]*\)$/.test(line.replace(/^[-*+]\s+|^\d+\.\s+/, ""))) blocks.push({ t: "li", text: t }); }
+        else if (/^>/.test(line)) { if (t.length >= 20) blocks.push({ t: "q", text: t }); }
+        else if (t.length >= 30) blocks.push({ t: "p", text: t });
+      }
+    }
+    const words = blocks.filter(b => b.t !== "h").reduce((n, b) => n + b.text.split(/\s+/).length, 0);
+    startLog(`Read through Jina Reader: ${words} words from ${url.slice(0, 60)}`);
+    return proxyCache[url] = words >= 80 ? { blocks: blocks.slice(0, 400), title, words, minutes: Math.max(1, Math.round(words / 230)), via: "jina" } : null;
+  } catch (e) { console.log("Jina Reader: " + e); return proxyCache[url] = null; }
 }
 async function articleHTML(url) {
   const get = async u => {
@@ -1138,8 +1202,12 @@ async function articleHTML(url) {
   }
   let r = await get(url);
   if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) {   // one consent answer at a time, shared by articles loading together
-    consentRun = consentRun || yahooConsent(r.html, r.url).catch(e => { console.log("Yahoo consent: " + e); return false; }).finally(() => { setTimeout(() => { consentRun = null; }, 0); });
-    if (await consentRun) r = await get(url);
+    if (!consentRun && settings.yahooCookie && Date.now() - consentAt < 60e3) consentRun = Promise.resolve(true);   // just answered: the cookies are there now
+    if (!consentRun) consentRun = yahooConsent(r.html, r.url).catch(e => { startLog("Yahoo consent failed: " + (e.message || e)); return false; }).then(ok => { consentRun = null; return ok; });
+    let ok = false;
+    try { ok = await consentRun; } catch (e) {}
+    if (ok) r = await get(url);
+    if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) startLog("Yahoo still shows its consent page" + (settings.readerProxy === false ? "; Jina Reader is off" : "; the article goes through Jina Reader"));
   }
   if (/news\.google\.com/i.test(r.url)) {   // still a Google page: follow it if it names the article
     const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
@@ -1180,7 +1248,11 @@ async function readArticle(n) {
   if (artMem[n.l]) return artMem[n.l];
   let art = null, url = n.l;
   try { const r = await articleHTML(n.l); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { console.log("Article " + n.l + ": " + e); }
-  return artMem[n.l] = { art, url: /^https:\/\//i.test(url) ? url : n.l, usable: !!(art && art.words > 80) };
+  if (!(art && art.words > 80)) {   // blocked or empty from the phone: Jina Reader
+    const px = await proxyRead(/consent|guce/i.test(url) ? n.l : url);
+    if (px) { const paras = px.blocks.filter(b => b.t !== "h").map(b => b.text); art = { desc: (art && art.desc) || "", paras, text: paras.join("\n\n"), words: px.words, via: "jina" }; }
+  }
+  return artMem[n.l] = { art, url: /^https:\/\//i.test(url) && !/consent|guce/i.test(url) ? url : n.l, usable: !!(art && art.words > 80) };
 }
 function extractiveTldr(title, art, text) {
   if (!art || !art.paras.length) return { lead: text || title, points: [] };
@@ -1635,7 +1707,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1748,7 +1820,7 @@ async function handle(m) {
     case "state": return push();
     case "set":
       if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen",
+      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen", "readerProxy",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -2884,6 +2956,7 @@ function clientApp() {
       ${sw("newsWeb", "Headlines from the web", "Wider coverage through Google News, including blogs and big newspapers")}
       ${sw("crowd", "Crowd mood", "How StockTwits posts lean, bullish or bearish (US tickers)")}
       ${sw("openInReader", "Open articles in the reader", "The article's own text in Stockit, with Listen and questions. Off: open it in Safari")}
+      ${sw("readerProxy", "Read blocked pages through Jina Reader", "When an article won't open from your phone (Yahoo's consent page in Europe, pages built by scripts), its public address goes to r.jina.ai, which returns the text")}
       <div class="srow"><div class="grow"><b>Finnhub key (optional)</b><small class="muted">${fh.last4 ? "Saved, ending …" + esc(fh.last4) : "Not set"}. A backup source for company numbers when Yahoo doesn't answer.</small></div>
         <button class="sm" data-act="secret-set" data-v="finnhub">${fh.last4 ? "Change" : "Add"}</button>${fh.last4 ? `<button class="sm danger ${secArmed === "finnhub" ? "armed" : ""}" data-act="secret-remove" data-v="finnhub">${secArmed === "finnhub" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <h3 class="sec">AI advice</h3>
