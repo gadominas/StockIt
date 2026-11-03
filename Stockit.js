@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.3';
+const VERSION = '1.19.4';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -57,7 +57,7 @@ const BLUEPRINTS = [
   { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
-  { id: 'read-aloud', name: 'Read aloud', version: '1.1.0', since: '1.18.0' },
+  { id: 'read-aloud', name: 'Read aloud', version: '1.2.0', since: '1.18.0' },
 ];
 
 // ---------- config ----------
@@ -2051,7 +2051,7 @@ async function handle(m) {
       const f = newsByReaderId(m.id); if (!f) return;
       track("reader_opened");
       if (m.cached) return;
-      if (m.retry) { delete proxyCache[f.n.l]; delete proxyCache[origOf[f.n.l]]; delete artMem[f.n.l]; }
+      if (m.refetch) { delete proxyCache[f.n.l]; delete proxyCache[origOf[f.n.l]]; delete artMem[f.n.l]; }
       const res = await readerArticle(f.n);
       if (res.blocked) res.excerpt = excerptOf(f.n);
       return call("onReader", m.id, res);
@@ -3674,7 +3674,7 @@ function clientApp() {
     if (d.loading) { el.innerHTML = `<p class="note rd-wait"><span class="busy-dot"></span> Getting the article from ${esc(pageHost(a.link))}…</p><div class="rd-skel"><i></i><i></i><i></i><i></i><i></i></div>`; return; }
     if (d.blocked) {
       const [h, p] = RD_WHY[d.blocked] || RD_WHY.unreadable;
-      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><div class="aic-btns"><button class="sm primary" data-act="rdorig">Open the article ↗</button><button class="sm" data-act="rdretry">Try again</button></div>
+      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><div class="aic-btns"><button class="sm primary" data-act="rdorig">Open the article ↗</button><button class="sm" data-act="rdrefetch">Try again</button></div>
         ${(d.trace || []).length ? `<details class="rd-trace"><summary>What Stockit tried</summary><ol>${d.trace.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div>
         ${d.excerpt ? `<h2 class="rd-h">From the feed</h2>${rdBlocks([{ t: "p", text: d.excerpt }], "x")}` : ""}`;
       return;
@@ -4040,7 +4040,7 @@ function clientApp() {
         else { rmArmed = v; renderDetail(); setTimeout(() => { if (rmArmed === v) { rmArmed = null; renderDetail(); } }, 3500); }
         break;
       case "openlink": send("openlink", { v }); break;
-      case "rdretry": if (rdId) { rdData[rdId] = { loading: true }; send("reader", { id: rdId, retry: true }); renderReaderText(); } break;
+      case "rdrefetch": if (rdId) { rdData[rdId] = { loading: true }; send("reader", { id: rdId, refetch: true }); renderReaderText(); } break;   // not "rdretry": that retries a question
       case "rdopen": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l); if (h) openReader("art-" + h.l); break; }
       case "story": busyK.add("story:" + v); renderDetail(); send("story", { s: v }); break;
       case "briefing": busyK.add("briefing"); render(); send("briefing", {}); break;
