@@ -2,6 +2,23 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.5 (2026-11-03): Heard in silent mode
+
+- 🔔 **Plays in silent mode**: Listening keeps playing with the Ring/Silent switch on.
+- 📱 **Opens without iCloud**: Stockit now opens on iPhones that aren't signed in to iCloud.
+- ⏹ **Stop means stop**: Stopping while an article loads no longer starts it a moment later.
+
+**Changes**
+
+- While reading aloud, Stockit tells iOS it's playing media, so voices play with the Ring/Silent switch on; other apps' music can play again when it stops
+- Without iCloud, Stockit keeps its data on the phone (Files › On My iPhone › Scriptable)
+
+**Fixes**
+
+- Read aloud was silent with the Ring/Silent switch on
+- On an iPhone not signed in to iCloud, Stockit stopped at once with "iCloud is not supported"
+- Stopping an article while it was still loading started reading anyway when it arrived
+
 ## 1.19.4 (2026-11-02): Try again, for real
 
 - 🔁 **Try again works**: The reader's Try again on an article that couldn't be read now reads it afresh.

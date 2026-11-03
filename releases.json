@@ -4,6 +4,37 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.19.5",
+      "date": "2026-11-03",
+      "title": "Heard in silent mode",
+      "highlights": [
+        {
+          "icon": "🔔",
+          "title": "Plays in silent mode",
+          "text": "Listening keeps playing with the Ring/Silent switch on."
+        },
+        {
+          "icon": "📱",
+          "title": "Opens without iCloud",
+          "text": "Stockit now opens on iPhones that aren't signed in to iCloud."
+        },
+        {
+          "icon": "⏹",
+          "title": "Stop means stop",
+          "text": "Stopping while an article loads no longer starts it a moment later."
+        }
+      ],
+      "changes": [
+        "While reading aloud, Stockit tells iOS it's playing media, so voices play with the Ring/Silent switch on; other apps' music can play again when it stops",
+        "Without iCloud, Stockit keeps its data on the phone (Files › On My iPhone › Scriptable)"
+      ],
+      "fixes": [
+        "Read aloud was silent with the Ring/Silent switch on",
+        "On an iPhone not signed in to iCloud, Stockit stopped at once with \"iCloud is not supported\"",
+        "Stopping an article while it was still loading started reading anyway when it arrived"
+      ]
+    },
+    {
       "version": "1.19.4",
       "date": "2026-11-02",
       "title": "Try again, for real",
