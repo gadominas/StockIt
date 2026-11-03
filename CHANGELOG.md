@@ -2,6 +2,24 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.2 (2026-11-02): Articles: see what happened
+
+- 🔍 **What Stockit tried**: When an article can't be read, the reader lists each step it tried and what came back.
+- 🔁 **Try again**: Retry an article right from the reader, without leaving it.
+- ↗ **Straight to the publisher**: Open the article goes to the publisher's page, not a blank Google News page.
+
+**Changes**
+
+- The reader's can't-be-read screen has What Stockit tried: each page opened (with its HTTP status and size), the consent answer and the cookies Yahoo returned, how many words were found, and Jina Reader's answer; each failed article is also written to the start-up log
+- Try again reads the article afresh, without anything remembered from the last attempt
+- Open the article and Read the full article open the publisher's own page for Google News links, instead of Google's redirect page, which stays blank in the app (and shows a consent page in Europe)
+- Google's consent wall in Europe is answered the way a browser would (reject all), so Google News links can be followed to the publisher
+- Yahoo's consent form is found even when it's written differently (quotes, form order)
+
+**Fixes**
+
+- Google News links opened as a blank page
+
 ## 1.19.1 (2026-11-02): Articles open again
 
 - 📰 **Yahoo articles read again**: In Europe, Yahoo's consent page stopped every article; Stockit now answers it properly.
