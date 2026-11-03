@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.1';
+const VERSION = '1.19.2';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1054,26 +1054,42 @@ function extractReader(html) {
 }
 const readerCache = {};   // link → the article's text, for questions about it (this session only)
 async function readerArticle(n) {   // { blocks, image, byline, words, minutes } or { blocked: why }
-  let r;
-  try { r = await articleHTML(n.l); }
+  let r; const log = [];
+  try { r = await articleHTML(n.l, log); }
   catch (e) {
-    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1], px = await proxyRead(n.l);
+    log.push("Couldn't open it: " + String(e.message || e).slice(0, 80));
+    const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1], px = await proxyRead(n.l, log);
     if (px) { readerCache[n.l] = px.blocks.map(b => b.text).join("\n\n"); return px; }
-    return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable" };
+    readerTrace(n, log);
+    return { blocked: ["401", "402", "403", "451"].includes(code) ? "signin" : "unreachable", trace: log };
   }
-  const viaProxy = async () => { const px = await proxyRead((r && r.url && !/consent|guce/i.test(r.url) ? r.url : n.l)); if (px) readerCache[n.l] = px.blocks.map(b => b.text).join("\n\n"); return px; };
-  if (!r || !r.html) return (await viaProxy()) || { blocked: r && /consent|guce/i.test(r.url || "") ? "consent" : "unreachable" };
+  if (r && r.url && !/consent|guce|news\.google\./i.test(r.url)) origOf[n.l] = r.url;   // the publisher's own page, for Open the article
+  const viaProxy = async () => { const px = await proxyRead((r && r.url && !/consent|guce/i.test(r.url) ? r.url : n.l), log); if (px) readerCache[n.l] = px.blocks.map(b => b.text).join("\n\n"); return px; };
+  if (!r || !r.html) { const px = await viaProxy(); if (px) return px; readerTrace(n, log); return { blocked: r && /consent|guce/i.test(r.url || "") ? "consent" : "unreachable", trace: log }; }
   const rd = extractReader(r.html);
+  log.push(`Found ${rd.words} words of article text on the page`);
   if (rd.words >= 120) {
     readerCache[n.l] = rd.blocks.filter(b => b.t !== "pre").map(b => b.text).join("\n\n");
     return rd;
   }
   const px = await viaProxy();
   if (px) return Object.assign({ image: rd.image, byline: rd.byline }, px);
+  readerTrace(n, log);
   const html = r.html;
   const why = /subscribe to (continue|read)|subscribers?[- ]only|paywall|(sign|log) in to (continue|read)|create a (free )?account to/i.test(html) ? "signin"
     : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
-  return { blocked: why };
+  return { blocked: why, trace: log };
+}
+const origOf = {};   // a headline's link → the publisher's own address, once known (Google News links hide it)
+function readerTrace(n, log) { startLog(`Article not read (${String(n.p || "").slice(0, 30)}): ` + log.join(" → ").slice(0, 400)); }
+// Google News links show a blank page while Google works out where to send you (and a consent page in Europe):
+// open the publisher's own article instead when Stockit can find it.
+async function publisherURL(u) {
+  if (!/news\.google\./i.test(u)) return u;
+  if (origOf[u]) return origOf[u];
+  if (artMem[u] && artMem[u].url && !/news\.google\./i.test(artMem[u].url)) return artMem[u].url;
+  try { const real = await googleNewsURL(u); if (real) return origOf[u] = real; } catch (e) {}
+  return u;
 }
 // A headline in Stockit's news, found by the reader's id ("art-" + link); nothing outside the news is ever opened
 function newsByReaderId(id) {
@@ -1122,14 +1138,15 @@ const unq = v => String(v || "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').
 function keepCookies(resp, jar) {
   for (const c of (resp && resp.cookies) || []) if (c && c.name && /yahoo/i.test(c.domain || "yahoo.com")) jar[c.name] = c.value;
 }
-async function yahooConsent(html, pageUrl) {
-  const form = (html.match(/<form[^>]*method="post"[\s\S]*?<\/form>/i) || [])[0];
-  if (!form) { console.log("Yahoo consent: no form on " + pageUrl); return false; }
-  const action = absUrl(unq((form.match(/action="([^"]*)"/i) || [])[1]), pageUrl);
+async function yahooConsent(html, pageUrl, log = []) {
+  const forms = html.match(/<form\b[\s\S]*?<\/form>/gi) || [];
+  const form = forms.find(f => /name=["']?agree/i.test(f)) || forms.find(f => /method=["']?post/i.test(f));
+  if (!form) { log.push(`Yahoo's consent page had no form to answer (${html.length} characters)`); return false; }
+  const action = absUrl(unq((form.match(/action=["']([^"']*)["']/i) || [])[1]), pageUrl);
   const fields = {};
   for (const inp of form.match(/<input[^>]+>/gi) || []) {
-    const name = (inp.match(/name="([^"]+)"/i) || [])[1], val = unq((inp.match(/value="([^"]*)"/i) || [])[1] || "");
-    if (name && /type="hidden"/i.test(inp)) fields[name] = val;
+    const name = (inp.match(/name=["']([^"']+)["']/i) || [])[1], val = unq((inp.match(/value=["']([^"']*)["']/i) || [])[1] || "");
+    if (name && /type=["']?hidden/i.test(inp)) fields[name] = val;
   }
   const sessionId = fields.sessionId || (pageUrl.match(/[?&]sessionId=([^&#]+)/) || [])[1] || "";
   if (!fields.consentUUID) fields.consentUUID = "default";
@@ -1142,6 +1159,7 @@ async function yahooConsent(html, pageUrl) {
   r.body = body;
   await r.loadString();
   keepCookies(r.response, jar);
+  log.push(`Answered Yahoo's consent (HTTP ${r.response ? r.response.statusCode : "?"}, ${Object.keys(fields).length} fields)`);
   if (sessionId) {   // as Yahoo's page does next: copy the consent to its other sites, which sets the cookies articles need
     const g = new Request(`https://guce.yahoo.com/copyConsent?sessionId=${encodeURIComponent(sessionId)}`);
     g.timeoutInterval = cfg("fetchTimeout");
@@ -1150,6 +1168,7 @@ async function yahooConsent(html, pageUrl) {
   }
   const names = Object.keys(jar);
   startLog(`Yahoo consent answered: ${names.length ? names.join(", ") : "no cookies returned"}`);
+  log.push(names.length ? `Yahoo returned cookies: ${names.join(", ")}` : "Yahoo returned no cookies");
   if (names.length) { settings.yahooCookie = names.map(k => k + "=" + jar[k]).join("; "); write("settings", settings); consentAt = Date.now(); }
   return true;
 }
@@ -1157,9 +1176,10 @@ async function yahooConsent(html, pageUrl) {
 // are read through Jina Reader (r.jina.ai), which opens the page on its own servers and returns its text.
 // Only the article's public address is sent; Settings › News and signals turns it off.
 const proxyCache = {};
-async function proxyRead(url) {
-  if (settings.readerProxy === false || !/^https?:\/\//i.test(url)) return null;
-  if (proxyCache[url] !== undefined) return proxyCache[url];
+async function proxyRead(url, log = []) {
+  if (settings.readerProxy === false) { log.push("Jina Reader is off (Settings › News and signals)"); return null; }
+  if (!/^https?:\/\//i.test(url)) return null;
+  if (proxyCache[url] !== undefined) { log.push(proxyCache[url] ? `Jina Reader (earlier): ${proxyCache[url].words} words` : "Jina Reader couldn't read it earlier"); return proxyCache[url]; }
   try {
     const r = new Request("https://r.jina.ai/" + url);
     r.timeoutInterval = Math.max(20, cfg("fetchTimeout"));
@@ -1184,35 +1204,40 @@ async function proxyRead(url) {
     }
     const words = blocks.filter(b => b.t !== "h").reduce((n, b) => n + b.text.split(/\s+/).length, 0);
     startLog(`Read through Jina Reader: ${words} words from ${url.slice(0, 60)}`);
+    log.push(`Jina Reader: HTTP ${code}, ${words} words${words < 80 ? " (too few)" : ""}`);
     return proxyCache[url] = words >= 80 ? { blocks: blocks.slice(0, 400), title, words, minutes: Math.max(1, Math.round(words / 230)), via: "jina" } : null;
-  } catch (e) { console.log("Jina Reader: " + e); return proxyCache[url] = null; }
+  } catch (e) { log.push("Jina Reader failed: " + String(e.message || e).slice(0, 80)); startLog("Jina Reader failed: " + (e.message || e)); return proxyCache[url] = null; }
 }
-async function articleHTML(url) {
+async function articleHTML(url, log = []) {
   const get = async u => {
     const r = new Request(u);
     r.timeoutInterval = cfg("fetchTimeout");
     r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-US,en;q=0.8" };
-    if (settings.yahooCookie && /(^|\.)yahoo\.com$/i.test((u.match(/^https?:\/\/([^/]+)/i) || [])[1] || "")) r.headers.Cookie = settings.yahooCookie;
+    const host = (u.match(/^https?:\/\/([^/]+)/i) || [])[1] || "";
+    if (settings.yahooCookie && /(^|\.)yahoo\.com$/i.test(host)) r.headers.Cookie = settings.yahooCookie;
+    if (/(^|\.)google\.[a-z.]+$/i.test(host)) r.headers.Cookie = "SOCS=CAI; CONSENT=PENDING+987";   // Google's consent wall in Europe: "reject all", as a browser would
     const html = await r.loadString();
     return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
   };
   if (/news\.google\.com/i.test(url)) {   // Google News links: find the publisher's address first
-    const real = await googleNewsURL(url).catch(e => { console.log("Google News link: " + e); return null; });
-    if (real) url = real;
+    const real = await googleNewsURL(url).catch(e => { log.push("Google News link not decoded: " + String(e.message || e).slice(0, 60)); return null; });
+    if (real) { log.push("Google News link leads to " + (real.match(/^https?:\/\/([^/]+)/i) || [])[1]); url = real; } else log.push("Google News didn't say where the article is");
   }
   let r = await get(url);
+  log.push(`Opened ${(r.url.match(/^https?:\/\/([^/?#]+)/i) || [])[1] || r.url}: HTTP ${r.code}, ${r.html.length} characters`);
   if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) {   // one consent answer at a time, shared by articles loading together
     if (!consentRun && settings.yahooCookie && Date.now() - consentAt < 60e3) consentRun = Promise.resolve(true);   // just answered: the cookies are there now
-    if (!consentRun) consentRun = yahooConsent(r.html, r.url).catch(e => { startLog("Yahoo consent failed: " + (e.message || e)); return false; }).then(ok => { consentRun = null; return ok; });
+    if (!consentRun) consentRun = yahooConsent(r.html, r.url, log).catch(e => { startLog("Yahoo consent failed: " + (e.message || e)); return false; }).then(ok => { consentRun = null; return ok; });
     let ok = false;
     try { ok = await consentRun; } catch (e) {}
-    if (ok) r = await get(url);
+    if (ok) { r = await get(url); log.push(`Opened it again: ${(r.url.match(/^https?:\/\/([^/?#]+)/i) || [])[1]}, HTTP ${r.code}, ${r.html.length} characters`); }
     if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) startLog("Yahoo still shows its consent page" + (settings.readerProxy === false ? "; Jina Reader is off" : "; the article goes through Jina Reader"));
   }
   if (/news\.google\.com/i.test(r.url)) {   // still a Google page: follow it if it names the article
     const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
     r = m ? await get(m[1].replace(/&amp;/g, "&")) : { html: "", url };
   }
+  if (/(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) log.push("Still a consent page");
   if (r.code >= 400 || /(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) r.html = "";
   return r;
 }
@@ -1247,9 +1272,10 @@ const artMem = {};
 async function readArticle(n) {
   if (artMem[n.l]) return artMem[n.l];
   let art = null, url = n.l;
-  try { const r = await articleHTML(n.l); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { console.log("Article " + n.l + ": " + e); }
+  const log = [];
+  try { const r = await articleHTML(n.l, log); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { log.push("Couldn't open it: " + (e.message || e)); }
   if (!(art && art.words > 80)) {   // blocked or empty from the phone: Jina Reader
-    const px = await proxyRead(/consent|guce/i.test(url) ? n.l : url);
+    const px = await proxyRead(/consent|guce/i.test(url) ? n.l : url, log);
     if (px) { const paras = px.blocks.filter(b => b.t !== "h").map(b => b.text); art = { desc: (art && art.desc) || "", paras, text: paras.join("\n\n"), words: px.words, via: "jina" }; }
   }
   return artMem[n.l] = { art, url: /^https:\/\//i.test(url) && !/consent|guce/i.test(url) ? url : n.l, usable: !!(art && art.words > 80) };
@@ -1949,6 +1975,7 @@ async function handle(m) {
       const f = newsByReaderId(m.id); if (!f) return;
       track("reader_opened");
       if (m.cached) return;
+      if (m.retry) { delete proxyCache[f.n.l]; delete proxyCache[origOf[f.n.l]]; delete artMem[f.n.l]; }
       const res = await readerArticle(f.n);
       if (res.blocked) res.excerpt = excerptOf(f.n);
       return call("onReader", m.id, res);
@@ -1962,7 +1989,7 @@ async function handle(m) {
     }
     case "open": {   // the reader's Original: only a headline in the news
       const f = m.orig ? newsByReaderId(m.id) : null;
-      if (f) await Safari.openInApp(f.n.l, false);
+      if (f) await Safari.openInApp(await publisherURL(f.n.l), false);
       return;
     }
     case "ttsaudio":   // one piece of ✦ AI speech, returned to the page as base64 MP3
@@ -2005,7 +2032,7 @@ async function handle(m) {
       try { txt = FileManager.local().readString(LOG_PATH).split("\n").slice(-40).join("\n"); } catch (e) {}
       return call("__done", m.req, true, txt);
     }
-    case "openlink": if (/^https:\/\//i.test(String(m.v || ""))) await Safari.openInApp(m.v, false); return;
+    case "openlink": if (/^https:\/\//i.test(String(m.v || ""))) await Safari.openInApp(await publisherURL(m.v), false); return;
     case "openurl":   // Settings › Built with: only the blueprints repository opens from here
       if (m.v === BLUEPRINTS_REPO || String(m.v).startsWith(BLUEPRINTS_REPO + "/")) await Safari.openInApp(m.v, false);
       return;
@@ -3569,7 +3596,8 @@ function clientApp() {
     if (d.loading) { el.innerHTML = `<p class="note rd-wait"><span class="busy-dot"></span> Getting the article from ${esc(pageHost(a.link))}…</p><div class="rd-skel"><i></i><i></i><i></i><i></i><i></i></div>`; return; }
     if (d.blocked) {
       const [h, p] = RD_WHY[d.blocked] || RD_WHY.unreadable;
-      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><button class="sm primary" data-act="rdorig">Open the article ↗</button></div>
+      el.innerHTML = `<div class="rd-blocked"><b>${esc(h)}</b><p>${esc(p)}</p><div class="aic-btns"><button class="sm primary" data-act="rdorig">Open the article ↗</button><button class="sm" data-act="rdretry">Try again</button></div>
+        ${(d.trace || []).length ? `<details class="rd-trace"><summary>What Stockit tried</summary><ol>${d.trace.map(t => `<li>${esc(t)}</li>`).join("")}</ol></details>` : ""}</div>
         ${d.excerpt ? `<h2 class="rd-h">From the feed</h2>${rdBlocks([{ t: "p", text: d.excerpt }], "x")}` : ""}`;
       return;
     }
@@ -3934,6 +3962,7 @@ function clientApp() {
         else { rmArmed = v; renderDetail(); setTimeout(() => { if (rmArmed === v) { rmArmed = null; renderDetail(); } }, 3500); }
         break;
       case "openlink": send("openlink", { v }); break;
+      case "rdretry": if (rdId) { rdData[rdId] = { loading: true }; send("reader", { id: rdId, retry: true }); renderReaderText(); } break;
       case "rdopen": { const x = newsOpen && byS(newsOpen.s), h = x && newsOf(x.s, newsOpen.l); if (h) openReader("art-" + h.l); break; }
       case "story": busyK.add("story:" + v); renderDetail(); send("story", { s: v }); break;
       case "briefing": busyK.add("briefing"); render(); send("briefing", {}); break;
@@ -4626,6 +4655,9 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .r-l .r-prev{display:block;font-size:calc(11.5px * var(--ts));color:var(--muted);opacity:.75;margin-top:1px;white-space:normal;overflow:visible;text-overflow:clip}
 .sum-n{font-size:calc(12.5px * var(--ts));color:var(--muted);margin-top:1px}
 .sum-p{font-size:calc(13px * var(--ts));color:var(--muted);opacity:.75;margin-top:2px}
+.rd-trace{margin-top:12px;font-size:calc(12.5px * var(--ts));color:var(--muted);text-align:left}
+.rd-trace summary{font-weight:700;color:var(--signal)}
+.rd-trace ol{margin:6px 0 0;padding-left:1.3em} .rd-trace li{margin:3px 0;-webkit-user-select:text;user-select:text}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
