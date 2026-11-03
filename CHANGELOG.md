@@ -2,6 +2,25 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.1 (2026-11-02): Articles open again
+
+- 📰 **Yahoo articles read again**: In Europe, Yahoo's consent page stopped every article; Stockit now answers it properly.
+- 🛟 **A way around blocked pages**: Pages that still won't open from your phone are read through Jina Reader.
+- 🩺 **Easy to check**: Settings › Updates › Start-up log shows how each blocked article was handled.
+
+**Changes**
+
+- Yahoo's consent step in Europe used two things Scriptable doesn't have (URL and setTimeout), so it failed before it started and every Yahoo article showed as unreadable; it now uses plain code
+- The consent answer now copies itself to Yahoo's sites the way Yahoo's own page does (copyConsent), and the cookies from both steps are kept
+- Articles opening together wait for one consent answer instead of each sending their own
+- When a page still can't be read from your phone (a consent page, a page built by scripts, an app block), the reader, TL;DRs and stories read it through Jina Reader (r.jina.ai), which sends back the article's text; only the article's public address is shared
+- Settings › News and signals › Read blocked pages through Jina Reader turns that off; then a consent page is reported as one
+- The start-up log records each consent answer and each article read through Jina Reader
+
+**Fixes**
+
+- Yahoo Finance articles couldn't be read in Europe (in the reader, TL;DRs, Listen and stories)
+
 ## 1.19.0 (2026-11-02): Today's session, and the one before
 
 - ⏱ **This session, per stock**: Each position shows what it made or lost since its market's last close, in your currency.
