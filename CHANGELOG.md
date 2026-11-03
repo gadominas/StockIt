@@ -2,6 +2,24 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.3 (2026-11-02): Through Google's consent wall
+
+- 🚪 **Google's consent, answered**: Stockit answers Google's consent page in Europe (Reject all) and follows Google News links to the publisher.
+- 🔎 **The same story on Yahoo**: If a Google News link still can't be followed, Stockit finds the same story on Yahoo Finance by its headline.
+- 🔑 **Jina Reader, clearer**: Its refusals now say why, and a free Jina key can be added if it asks for one.
+
+**Changes**
+
+- Google News links in Europe landed on Google's consent page (consent.google.com), so Stockit never learned where the article was; Stockit now answers that page with its own Reject all form and keeps the cookie Google sets
+- When a Google News link still can't be followed, Stockit searches Yahoo Finance for the same headline and reads that copy (many stories, like Simply Wall St's, are on both); Open the article then goes there too
+- Jina Reader isn't asked to open Google News links, which it refuses (the HTTP 403 in What Stockit tried)
+- When Jina Reader refuses, What Stockit tried shows its reason
+- Settings › News and signals › Jina Reader key (optional): add a free key from jina.ai if Jina Reader refuses without one; kept in the Keychain
+
+**Fixes**
+
+- Articles from Google News couldn't be read in Europe
+
 ## 1.19.2 (2026-11-02): Articles: see what happened
 
 - 🔍 **What Stockit tried**: When an article can't be read, the reader lists each step it tried and what came back.
