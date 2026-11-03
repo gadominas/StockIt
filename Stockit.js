@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.2';
+const VERSION = '1.19.3';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -70,7 +70,8 @@ const AI = {
 };
 const PROVIDERS = { anthropic: "Claude", openai: "OpenAI" };
 // Other secrets: each its own Keychain entry, typed into a native secure prompt, never in settings.json or the page.
-const SECRETS = { finnhub: { key: "STOCKIT_FINNHUB_KEY", name: "Finnhub key", hint: "Free at finnhub.io › Dashboard. Used only when Yahoo doesn't answer." } };
+const SECRETS = { finnhub: { key: "STOCKIT_FINNHUB_KEY", name: "Finnhub key", hint: "Free at finnhub.io › Dashboard. Used only when Yahoo doesn't answer." },
+  jina: { key: "STOCKIT_JINA_KEY", name: "Jina Reader key", hint: "Free at jina.ai (API key). Only needed when Jina Reader answers 401, 402 or 403 without one." } };
 const DAY = 864e5;
 const DEFAULT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 
@@ -1055,7 +1056,13 @@ function extractReader(html) {
 const readerCache = {};   // link → the article's text, for questions about it (this session only)
 async function readerArticle(n) {   // { blocks, image, byline, words, minutes } or { blocked: why }
   let r; const log = [];
-  try { r = await articleHTML(n.l, log); }
+  try {
+    r = await articleHTML(n.l, log);
+    if (/news\.google\./i.test(n.l) && (!r.html || /news\.google\.|consent\.google\./i.test(r.url))) {
+      const alt = await sameOnYahoo(n, log);
+      if (alt) { r = await articleHTML(alt, log); origOf[n.l] = alt; }
+    }
+  }
   catch (e) {
     log.push("Couldn't open it: " + String(e.message || e).slice(0, 80));
     const code = (String(e.message || e).match(/HTTP (\d+)/) || [])[1], px = await proxyRead(n.l, log);
@@ -1080,7 +1087,25 @@ async function readerArticle(n) {   // { blocks, image, byline, words, minutes }
     : /cookie|consent|gdpr|privacy (choices|settings)|accept all/i.test(html) ? "consent" : "unreadable";
   return { blocked: why, trace: log };
 }
-const origOf = {};   // a headline's link → the publisher's own address, once known (Google News links hide it)
+const origOf = {};
+// Many stories in Google News are also on Yahoo Finance (agencies, Simply Wall St, Motley Fool…): found by headline.
+const normT = t => String(t || "").toLowerCase().replace(/\s+-\s+[^-]{2,40}$/, "").replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(w => w.length > 2);
+async function sameOnYahoo(n, log = []) {
+  const want = normT(n.t);
+  if (want.length < 4) return null;
+  try {
+    const q = String(n.t).replace(/\s+-\s+[^-]{2,40}$/, "").slice(0, 150);
+    const j = JSON.parse(await getText(`https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=0&newsCount=8&enableFuzzyQuery=false`, { Accept: "application/json" }));
+    let best = null, bestScore = 0;
+    for (const it of (j && j.news) || []) {
+      const got = new Set(normT(it.title)), score = want.filter(w => got.has(w)).length / want.length;
+      if (score > bestScore && /^https:\/\//.test(it.link || "")) { best = it; bestScore = score; }
+    }
+    if (best && bestScore >= 0.75) { log.push(`Found the same story on Yahoo Finance (${Math.round(bestScore * 100)}% match)`); return best.link; }
+    log.push("Not found on Yahoo Finance by its headline");
+  } catch (e) { log.push("Yahoo search failed: " + String(e.message || e).slice(0, 60)); }
+  return null;
+}   // a headline's link → the publisher's own address, once known (Google News links hide it)
 function readerTrace(n, log) { startLog(`Article not read (${String(n.p || "").slice(0, 30)}): ` + log.join(" → ").slice(0, 400)); }
 // Google News links show a blank page while Google works out where to send you (and a consent page in Europe):
 // open the publisher's own article instead when Stockit can find it.
@@ -1179,13 +1204,20 @@ const proxyCache = {};
 async function proxyRead(url, log = []) {
   if (settings.readerProxy === false) { log.push("Jina Reader is off (Settings › News and signals)"); return null; }
   if (!/^https?:\/\//i.test(url)) return null;
+  if (/news\.google\.|consent\.google\./i.test(url)) { log.push("Jina Reader can't follow Google News links"); return null; }
   if (proxyCache[url] !== undefined) { log.push(proxyCache[url] ? `Jina Reader (earlier): ${proxyCache[url].words} words` : "Jina Reader couldn't read it earlier"); return proxyCache[url]; }
   try {
     const r = new Request("https://r.jina.ai/" + url);
     r.timeoutInterval = Math.max(20, cfg("fetchTimeout"));
     r.headers = { "Accept": "text/plain", "X-Return-Format": "markdown", "User-Agent": cfg("userAgent") };
+    const jk = secretFor("jina");
+    if (jk) r.headers.Authorization = "Bearer " + jk;
     const txt = await r.loadString(), code = r.response ? r.response.statusCode : 0;
-    if (code >= 400 || !txt) throw new Error("HTTP " + code);
+    if (code >= 400 || !txt) {
+      let why = String(txt || "").replace(/\s+/g, " ").trim();
+      try { const j = JSON.parse(txt); why = j.readableMessage || j.message || j.detail || why; } catch (e) {}
+      throw new Error(`HTTP ${code}${why ? ": " + why.slice(0, 120) : ""}${[401, 402, 403].includes(code) && !jk ? " (a free Jina Reader key in Settings › News and signals may help)" : ""}`);
+    }
     const md = (txt.split(/\nMarkdown Content:\s*\n/)[1] || txt).trim();
     const title = (txt.match(/^Title:\s*(.+)$/m) || [])[1] || "";
     const blocks = [];
@@ -1215,12 +1247,12 @@ async function articleHTML(url, log = []) {
     r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5", "Accept-Language": "en-US,en;q=0.8" };
     const host = (u.match(/^https?:\/\/([^/]+)/i) || [])[1] || "";
     if (settings.yahooCookie && /(^|\.)yahoo\.com$/i.test(host)) r.headers.Cookie = settings.yahooCookie;
-    if (/(^|\.)google\.[a-z.]+$/i.test(host)) r.headers.Cookie = "SOCS=CAI; CONSENT=PENDING+987";   // Google's consent wall in Europe: "reject all", as a browser would
+    if (/(^|\.)google\.[a-z.]+$/i.test(host)) r.headers.Cookie = googleCookie();   // Google's consent wall in Europe, answered once
     const html = await r.loadString();
     return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
   };
   if (/news\.google\.com/i.test(url)) {   // Google News links: find the publisher's address first
-    const real = await googleNewsURL(url).catch(e => { log.push("Google News link not decoded: " + String(e.message || e).slice(0, 60)); return null; });
+    const real = await googleNewsURL(url, log).catch(e => { log.push("Google News link not decoded: " + String(e.message || e).slice(0, 60)); return null; });
     if (real) { log.push("Google News link leads to " + (real.match(/^https?:\/\/([^/]+)/i) || [])[1]); url = real; } else log.push("Google News didn't say where the article is");
   }
   let r = await get(url);
@@ -1233,17 +1265,57 @@ async function articleHTML(url, log = []) {
     if (ok) { r = await get(url); log.push(`Opened it again: ${(r.url.match(/^https?:\/\/([^/?#]+)/i) || [])[1]}, HTTP ${r.code}, ${r.html.length} characters`); }
     if (/consent\.yahoo\.com|guce\.yahoo\.com/i.test(r.url)) startLog("Yahoo still shows its consent page" + (settings.readerProxy === false ? "; Jina Reader is off" : "; the article goes through Jina Reader"));
   }
+  if (/consent\.google\./i.test(r.url) && await googleConsent(r.html, r.url, log).catch(() => false)) { r = await get(url); log.push(`Opened it again: ${(r.url.match(/^https?:\/\/([^/?#]+)/i) || [])[1]}, HTTP ${r.code}`); }
   if (/news\.google\.com/i.test(r.url)) {   // still a Google page: follow it if it names the article
     const m = r.html.match(/data-n-au="([^"]+)"/) || r.html.match(/<a[^>]+href="(https:\/\/(?![a-z.]*google\.)[^"]+)"/i);
     r = m ? await get(m[1].replace(/&amp;/g, "&")) : { html: "", url };
   }
   if (/(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) log.push("Still a consent page");
+  if (/news\.google\.|consent\.google\./i.test(r.url)) r.html = "";   // Google's own pages are never the article
   if (r.code >= 400 || /(^https?:\/\/)?(consent|guce)\.[a-z.]*\//i.test(r.url)) r.html = "";
   return r;
 }
 // Google News article links hide the publisher's address. Older ones carry it inside the id; newer ones are
 // exchanged for it with the signature and timestamp on Google's article page (the method news readers use).
-async function googleNewsURL(url) {
+// Google's consent wall in Europe (consent.google.com): answered with its own "Reject all" form, as a browser would,
+// and the cookies it sets kept, so Google News links can be followed to the publisher.
+const googleCookie = () => settings.googleCookie || "SOCS=CAI";
+async function googleConsent(html, pageUrl, log = []) {
+  const forms = (html.match(/<form\b[\s\S]*?<\/form>/gi) || []).filter(f => /consent\.google|\/save/i.test((f.match(/action=["']([^"']*)["']/i) || [])[1] || ""));
+  const form = forms.find(f => /name=["']set_eom["'][^>]*value=["']true["']|value=["']true["'][^>]*name=["']set_eom["']/i.test(f)) || forms[0];
+  if (!form) { log.push(`Google's consent page had no form to answer (${html.length} characters)`); return false; }
+  const action = absUrl(unq((form.match(/action=["']([^"']*)["']/i) || [])[1]), pageUrl), fields = [];
+  for (const inp of form.match(/<input[^>]+>/gi) || []) {
+    const name = (inp.match(/name=["']([^"']+)["']/i) || [])[1], val = unq((inp.match(/value=["']([^"']*)["']/i) || [])[1] || "");
+    if (name) fields.push(encodeURIComponent(name) + "=" + encodeURIComponent(val));
+  }
+  const r = new Request(action);
+  r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "User-Agent": cfg("userAgent"), "Content-Type": "application/x-www-form-urlencoded", "Referer": pageUrl };
+  r.body = fields.join("&");
+  await r.loadString();
+  const jar = {};
+  for (const c of (r.response && r.response.cookies) || []) if (c && c.name && /google/i.test(c.domain || "google.com")) jar[c.name] = c.value;
+  const names = Object.keys(jar);
+  log.push(`Answered Google's consent (HTTP ${r.response ? r.response.statusCode : "?"})${names.length ? ", cookies: " + names.join(", ") : ", no cookies returned"}`);
+  startLog(`Google consent answered: ${names.length ? names.join(", ") : "no cookies returned"}`);
+  if (names.length) { settings.googleCookie = names.map(k => k + "=" + jar[k]).join("; "); write("settings", settings); }
+  return true;
+}
+async function googlePage(u, log = []) {
+  const get = async () => {
+    const r = new Request(u);
+    r.timeoutInterval = cfg("fetchTimeout");
+    r.headers = { "User-Agent": cfg("userAgent"), "Accept": "text/html", "Accept-Language": "en-US,en;q=0.8", "Cookie": googleCookie() };
+    const html = await r.loadString();
+    return { html: html || "", url: (r.response && r.response.url) || u, code: r.response ? r.response.statusCode : 0 };
+  };
+  let r = await get();
+  if (/consent\.google\./i.test(r.url) && await googleConsent(r.html, r.url, log).catch(e => { log.push("Google consent failed: " + (e.message || e)); return false; })) r = await get();
+  if (/consent\.google\./i.test(r.url)) log.push("Google still shows its consent page");
+  return r;
+}
+async function googleNewsURL(url, log = []) {
   const id = (String(url).match(/\/articles\/([^?/#]+)/) || [])[1];
   if (!id) return null;
   try {
@@ -1251,13 +1323,13 @@ async function googleNewsURL(url) {
     const m = raw.match(/https?:\/\/[^\s"'<>\x00-\x1f\x7f-\uffff]+/);
     if (m && !/^AU_yq/.test(raw.slice(4))) return m[0];
   } catch (e) {}
-  const page = await getText(`https://news.google.com/rss/articles/${id}`, { Accept: "text/html" });
+  const page = (await googlePage(`https://news.google.com/rss/articles/${id}`, log)).html;
   const sg = (page.match(/data-n-a-sg="([^"]+)"/) || [])[1], ts = (page.match(/data-n-a-ts="([^"]+)"/) || [])[1];
-  if (!sg || !ts) return null;
+  if (!sg || !ts) { log.push("Google's article page had no link signature"); return null; }
   const inner = `["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"${id}",${ts},"${sg}"]`;
   const r = new Request("https://news.google.com/_/DotsSplashUi/data/batchexecute");
   r.method = "POST"; r.timeoutInterval = cfg("fetchTimeout");
-  r.headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": cfg("userAgent") };
+  r.headers = { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": cfg("userAgent"), "Cookie": googleCookie() };
   r.body = "f.req=" + encodeURIComponent(JSON.stringify([[["Fbv4je", inner, null, "generic"]]]));
   const txt = await r.loadString();
   for (const line of String(txt).split("\n")) {
@@ -1273,7 +1345,11 @@ async function readArticle(n) {
   if (artMem[n.l]) return artMem[n.l];
   let art = null, url = n.l;
   const log = [];
-  try { const r = await articleHTML(n.l, log); url = r.url; if (r.html) art = extractArticle(r.html); } catch (e) { log.push("Couldn't open it: " + (e.message || e)); }
+  try {
+    let r = await articleHTML(n.l, log);
+    if (/news\.google\./i.test(n.l) && (!r.html || /news\.google\.|consent\.google\./i.test(r.url))) { const alt = await sameOnYahoo(n, log); if (alt) r = await articleHTML(alt, log); }
+    url = r.url; if (r.html) art = extractArticle(r.html);
+  } catch (e) { log.push("Couldn't open it: " + (e.message || e)); }
   if (!(art && art.words > 80)) {   // blocked or empty from the phone: Jina Reader
     const px = await proxyRead(/consent|guce/i.test(url) ? n.l : url, log);
     if (px) { const paras = px.blocks.filter(b => b.t !== "h").map(b => b.text); art = { desc: (art && art.desc) || "", paras, text: paras.join("\n\n"), words: px.words, via: "jina" }; }
@@ -1841,7 +1917,7 @@ async function handle(m) {
       if (u) { pendingUpdate = u; offerUpdate(); }
       return;
     }
-    case "secret-set": if (SECRETS[m.v] && await askSecret(m.v)) { toast(`${SECRETS[m.v].name} saved`); runRefresh(true); } return push();
+    case "secret-set": if (SECRETS[m.v] && await askSecret(m.v)) { toast(`${SECRETS[m.v].name} saved`); if (m.v === "jina") { for (const k of Object.keys(proxyCache)) delete proxyCache[k]; } else runRefresh(true); } return push();
     case "secret-remove": if (SECRETS[m.v] && Keychain.contains(SECRETS[m.v].key)) { Keychain.remove(SECRETS[m.v].key); toast(`${SECRETS[m.v].name} removed`); } return push();
     case "state": return push();
     case "set":
@@ -2984,6 +3060,8 @@ function clientApp() {
       ${sw("crowd", "Crowd mood", "How StockTwits posts lean, bullish or bearish (US tickers)")}
       ${sw("openInReader", "Open articles in the reader", "The article's own text in Stockit, with Listen and questions. Off: open it in Safari")}
       ${sw("readerProxy", "Read blocked pages through Jina Reader", "When an article won't open from your phone (Yahoo's consent page in Europe, pages built by scripts), its public address goes to r.jina.ai, which returns the text")}
+      <div class="srow"><div class="grow"><b>Jina Reader key (optional)</b><small class="muted">${S.secrets.jina && S.secrets.jina.last4 ? "Saved, ending …" + esc(S.secrets.jina.last4) : "Not set"}. Free at jina.ai; only needed if Jina Reader refuses without one.</small></div>
+        <button class="sm" data-act="secret-set" data-v="jina">${S.secrets.jina && S.secrets.jina.last4 ? "Change" : "Add"}</button>${S.secrets.jina && S.secrets.jina.last4 ? `<button class="sm danger ${secArmed === "jina" ? "armed" : ""}" data-act="secret-remove" data-v="jina">${secArmed === "jina" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <div class="srow"><div class="grow"><b>Finnhub key (optional)</b><small class="muted">${fh.last4 ? "Saved, ending …" + esc(fh.last4) : "Not set"}. A backup source for company numbers when Yahoo doesn't answer.</small></div>
         <button class="sm" data-act="secret-set" data-v="finnhub">${fh.last4 ? "Change" : "Add"}</button>${fh.last4 ? `<button class="sm danger ${secArmed === "finnhub" ? "armed" : ""}" data-act="secret-remove" data-v="finnhub">${secArmed === "finnhub" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <h3 class="sec">AI advice</h3>
