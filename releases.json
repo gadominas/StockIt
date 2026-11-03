@@ -4,6 +4,24 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.19.4",
+      "date": "2026-11-02",
+      "title": "Try again, for real",
+      "highlights": [
+        {
+          "icon": "🔁",
+          "title": "Try again works",
+          "text": "The reader's Try again on an article that couldn't be read now reads it afresh."
+        }
+      ],
+      "changes": [
+        "Read aloud blueprint 1.2.0: Stockit's way of getting pages (consent walls, Google News links, Jina Reader, What Stockit tried) is now the blueprint's Step 9; Settings › Built with shows read-aloud 1.2.0"
+      ],
+      "fixes": [
+        "Try again under an article that couldn't be read did nothing: it shared its name with the questions' Try again, which took the tap"
+      ]
+    },
+    {
       "version": "1.19.3",
       "date": "2026-11-02",
       "title": "Through Google's consent wall",

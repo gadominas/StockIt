@@ -2,6 +2,18 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.19.4 (2026-11-02): Try again, for real
+
+- 🔁 **Try again works**: The reader's Try again on an article that couldn't be read now reads it afresh.
+
+**Changes**
+
+- Read aloud blueprint 1.2.0: Stockit's way of getting pages (consent walls, Google News links, Jina Reader, What Stockit tried) is now the blueprint's Step 9; Settings › Built with shows read-aloud 1.2.0
+
+**Fixes**
+
+- Try again under an article that couldn't be read did nothing: it shared its name with the questions' Try again, which took the tap
+
 ## 1.19.3 (2026-11-02): Through Google's consent wall
 
 - 🚪 **Google's consent, answered**: Stockit answers Google's consent page in Europe (Reject all) and follows Google News links to the publisher.
