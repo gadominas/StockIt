@@ -4,6 +4,21 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.20.3",
+      "date": "2026-11-04",
+      "title": "A slight pull is enough",
+      "highlights": [
+        {
+          "icon": "👇",
+          "title": "Shorter pull to close",
+          "text": "A slight pull or a short flick down now closes a stock's page."
+        }
+      ],
+      "changes": [
+        "Pulling a stock's page (and the TL;DR, reader and portfolio check) down closes it after about 40 points instead of 130, or after a short flick; a tiny slow drag still springs back"
+      ]
+    },
+    {
       "version": "1.20.2",
       "date": "2026-11-04",
       "title": "Pull down to close",

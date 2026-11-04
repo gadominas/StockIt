@@ -2,6 +2,14 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.20.3 (2026-11-04): A slight pull is enough
+
+- 👇 **Shorter pull to close**: A slight pull or a short flick down now closes a stock's page.
+
+**Changes**
+
+- Pulling a stock's page (and the TL;DR, reader and portfolio check) down closes it after about 40 points instead of 130, or after a short flick; a tiny slow drag still springs back
+
 ## 1.20.2 (2026-11-04): Pull down to close
 
 - 👇 **Pull down to close**: Slide a stock's page down to close it, like in Apple's Stocks app; no need to reach for Done.
