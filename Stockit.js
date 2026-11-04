@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.20.1';
+const VERSION = '1.20.2';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -2699,6 +2699,51 @@ function clientApp() {
     const sg = v => (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, Math.abs(v) >= 10000, Math.abs(v) >= 10000 ? null : 0);
     return `<small class="r-pl">Invested ${P(money(i2, cur, true))} · <span class="${cls(g)}">${P(sg(g))} (${pct(g / i2 * 100, 1)})</span></small>`;
   }
+  // Pull a sheet down to close it, as in iOS: from its header at any time, or from anywhere once it's scrolled to the top.
+  // The chart, text fields and the range buttons keep their own touches. Far enough or fast enough closes; otherwise it springs back.
+  const SHEET_CLOSE = {
+    detail: () => { openSym = null; renderDetail(); },
+    newssheet: () => { newsOpen = null; renderNews(); },
+    reader: () => { rdId = ""; renderReader(); },
+    checksheet: () => { checkOpen = false; renderCheck(); },
+  };
+  let pull = null;
+  document.addEventListener("touchstart", e => {
+    pull = null;
+    if (e.touches.length !== 1 || !e.target.closest) return;
+    const sh = e.target.closest(".sheet.open");
+    if (!sh || !SHEET_CLOSE[sh.id]) return;
+    const fromHead = !!e.target.closest(".sh-head");
+    if (!fromHead && (sh.scrollTop > 0 || e.target.closest(".chart, input, textarea, select, .seg, .rd-ask"))) return;
+    pull = { sh, y0: e.touches[0].clientY, x0: e.touches[0].clientX, t: Date.now(), y: e.touches[0].clientY, v: 0, dy: 0, on: false, fromHead };
+  }, { passive: true });
+  document.addEventListener("touchmove", e => {
+    if (!pull) return;
+    const t = e.touches[0], dy = t.clientY - pull.y0, dx = t.clientX - pull.x0;
+    if (!pull.on) {
+      if (dy < -6 || Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { pull = null; return; }   // scrolling up, or sideways
+      if (dy < 8) return;
+      if (!pull.fromHead && pull.sh.scrollTop > 0) { pull = null; return; }
+      pull.on = true; pull.sh.style.transition = "none"; pull.sh.classList.add("pulling");
+    }
+    e.preventDefault();
+    const now = Date.now(); pull.v = (t.clientY - pull.y) / Math.max(1, now - pull.t); pull.t = now; pull.y = t.clientY;
+    pull.dy = Math.max(0, dy - 8);
+    pull.sh.style.transform = `translateY(${pull.dy}px)`;
+  }, { passive: false });
+  const endPull = cancel => {
+    if (!pull) return;
+    const p = pull; pull = null;
+    if (!p.on) return;
+    p.sh.style.transition = ""; p.sh.classList.remove("pulling");
+    if (!cancel && (p.dy > 130 || (p.dy > 40 && p.v > 0.5))) {
+      p.sh.style.transform = "translateY(102%)";
+      setTimeout(() => { const f = SHEET_CLOSE[p.sh.id]; p.sh.style.transform = ""; if (f) f(); }, 270);
+    } else p.sh.style.transform = "";
+  };
+  document.addEventListener("touchend", () => endPull(false));
+  document.addEventListener("touchcancel", () => endPull(true));
+
   // Arrange: drag rows by ≡ into your own order, pin to the top, highlight. Long-pressing a row also starts it.
   const PIN_I = `<svg class="pin-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3l6 6-3 1-4 4 .5 4.5L13 20l-4-4-5 5-1-1 5-5-4-4 1.5-1.5L10 10l4-4z" fill="currentColor"/></svg>`;
   function arrRow(x) {
@@ -4355,6 +4400,10 @@ body.d-tiny .row .trendln,body.d-tiny .r-sig span:last-child{display:none}
 /* sheets (app-blueprints · settings) */
 .sheet{position:fixed;inset:0;z-index:10;background:var(--paper);transform:translateY(102%);transition:transform .28s ease;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .sheet.open{transform:none}
+/* pull down to close: a grabber at the top of sheets that can be pulled */
+#detail .sh-head,#newssheet .sh-head,#reader .sh-head,#checksheet .sh-head{position:sticky}
+#detail .sh-head::before,#newssheet .sh-head::before,#reader .sh-head::before,#checksheet .sh-head::before{content:"";position:absolute;top:5px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--rule)}
+.sheet.pulling{box-shadow:0 -8px 30px rgba(0,0,0,.25);border-radius:14px 14px 0 0}
 #detail{z-index:11} #addsheet{z-index:12} #cfgsheet{z-index:13}
 .sh-head{position:sticky;top:0;z-index:2;background:var(--paper);display:flex;justify-content:space-between;align-items:center;padding:calc(env(safe-area-inset-top) + 14px) 18px 12px;border-bottom:1px solid var(--rule)}
 .sh-head h2{font:700 calc(24px * var(--ts))/1 var(--display);margin:0}
