@@ -4,6 +4,29 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.20.2",
+      "date": "2026-11-04",
+      "title": "Pull down to close",
+      "highlights": [
+        {
+          "icon": "👇",
+          "title": "Pull down to close",
+          "text": "Slide a stock's page down to close it, like in Apple's Stocks app; no need to reach for Done."
+        },
+        {
+          "icon": "📰",
+          "title": "Everywhere it fits",
+          "text": "The same works for a headline's TL;DR, the article reader and the portfolio check."
+        }
+      ],
+      "changes": [
+        "A stock's page closes when you pull it down: from its header at any time, or from anywhere once it's scrolled to the top; a short or slow pull springs back, a long pull or a quick flick closes it",
+        "A small grabber at the top of these pages shows they can be pulled",
+        "The chart keeps its own touch (sliding along it still shows prices), and so do text fields and the range buttons",
+        "The TL;DR sheet, the article reader and Check my portfolio close the same way"
+      ]
+    },
+    {
       "version": "1.20.1",
       "date": "2026-11-04",
       "title": "Opens on any iPhone",

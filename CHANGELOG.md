@@ -2,6 +2,18 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.20.2 (2026-11-04): Pull down to close
+
+- 👇 **Pull down to close**: Slide a stock's page down to close it, like in Apple's Stocks app; no need to reach for Done.
+- 📰 **Everywhere it fits**: The same works for a headline's TL;DR, the article reader and the portfolio check.
+
+**Changes**
+
+- A stock's page closes when you pull it down: from its header at any time, or from anywhere once it's scrolled to the top; a short or slow pull springs back, a long pull or a quick flick closes it
+- A small grabber at the top of these pages shows they can be pulled
+- The chart keeps its own touch (sliding along it still shows prices), and so do text fields and the range buttons
+- The TL;DR sheet, the article reader and Check my portfolio close the same way
+
 ## 1.20.1 (2026-11-04): Opens on any iPhone
 
 - 📱 **Opens on any iPhone**: Stockit opens on iPhones that aren't signed in to iCloud, every time.
