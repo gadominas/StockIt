@@ -4,6 +4,35 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.20.0",
+      "date": "2026-11-02",
+      "title": "Your order, your favourites",
+      "highlights": [
+        {
+          "icon": "↕️",
+          "title": "Drag into your own order",
+          "text": "Arrange your portfolio and watchlist by dragging; long-press any stock to start."
+        },
+        {
+          "icon": "📌",
+          "title": "Pin to the top",
+          "text": "Pinned stocks stay first, whichever way the list is sorted."
+        },
+        {
+          "icon": "★",
+          "title": "Highlight",
+          "text": "Highlighted stocks get an amber edge and star, so they stand out."
+        }
+      ],
+      "changes": [
+        "Portfolio and Watchlist: Arrange (next to the count, or long-press any stock) shows a ≡ handle on each row; drag it to move the stock, then Done",
+        "A new Mine sort keeps your own order; arranging from another sort starts from the order on screen, so nothing jumps",
+        "📌 pins a stock to the top of its list in every sort (Mine, Value, Today, Signal, A–Z); ★ highlights it with an amber edge and star",
+        "Pin to the top and Highlight are also on each stock's page, under Manage",
+        "Your order, pins and highlights are saved with your stocks and kept in iCloud"
+      ]
+    },
+    {
       "version": "1.19.5",
       "date": "2026-11-03",
       "title": "Heard in silent mode",

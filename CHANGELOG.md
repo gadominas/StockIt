@@ -2,6 +2,20 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.20.0 (2026-11-02): Your order, your favourites
+
+- ↕️ **Drag into your own order**: Arrange your portfolio and watchlist by dragging; long-press any stock to start.
+- 📌 **Pin to the top**: Pinned stocks stay first, whichever way the list is sorted.
+- ★ **Highlight**: Highlighted stocks get an amber edge and star, so they stand out.
+
+**Changes**
+
+- Portfolio and Watchlist: Arrange (next to the count, or long-press any stock) shows a ≡ handle on each row; drag it to move the stock, then Done
+- A new Mine sort keeps your own order; arranging from another sort starts from the order on screen, so nothing jumps
+- 📌 pins a stock to the top of its list in every sort (Mine, Value, Today, Signal, A–Z); ★ highlights it with an amber edge and star
+- Pin to the top and Highlight are also on each stock's page, under Manage
+- Your order, pins and highlights are saved with your stocks and kept in iCloud
+
 ## 1.19.5 (2026-11-03): Heard in silent mode
 
 - 🔔 **Plays in silent mode**: Listening keeps playing with the Ring/Silent switch on.
