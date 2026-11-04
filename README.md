@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.19.4-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.20.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -132,6 +132,20 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Your order, pins and highlights
+
+<img src="docs/screenshots/35-arrange.png" width="250" align="right" alt="Arrange: each stock with a drag handle, a pin and a star; one highlighted">
+
+Put your stocks in the order you think in. On **Portfolio** or **Watchlist**, tap **Arrange** next to the count, or long-press any stock:
+
+- **Drag ≡** to move a stock up or down; **Done** when you're finished. The list then sorts by **Mine**, your own order; the other sorts are still one tap away.
+- **📌 Pin** keeps a stock at the top of its list, whichever sort you choose.
+- **★ Highlight** gives a stock an amber edge and a star, so it stands out.
+
+Pin and highlight are also on each stock's page, under **Manage**. Your order, pins and highlights are kept with your stocks.
+
+<br clear="right">
 
 ## Privacy for demos
 
@@ -349,6 +363,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Move, pin or highlight a stock | **Arrange** next to the count (or long-press a stock): drag ≡, tap 📌 or ★ |
 | Hide your amounts for a demo | Tap the small **eye** beside **Updated**; tap again to show them |
 | Check Stockit against your broker | Tap the **✓ shield** on your portfolio, add screenshots, tap **Check**, then apply or ignore each suggestion |
 | Look at an idea closely | **Ideas**, tap the idea's ticker or **See everything** |

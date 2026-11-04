@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.19.5';
+const VERSION = '1.20.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1776,7 +1776,7 @@ function clientState() {
   const view = x => {
       const m = market[x.s] || {};
       return {
-        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0,
+        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, idx: stocks.indexOf(x),
         price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
         st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
@@ -1968,6 +1968,18 @@ async function handle(m) {
     }
     case "shot": return importScreenshot(m.list === "own" ? "own" : "watch");
     case "holding": if (x && await editHolding(x)) { saveAll(); push(); saveWidget(widgetSnapshot()); } return;
+    case "reorder": {   // your own order for one list, from dragging in Arrange; the other list keeps its places
+      const list = m.v === "own" ? "own" : "watch", want = (Array.isArray(m.order) ? m.order : []).map(String);
+      const mine = stocks.filter(y => (y.list === "own") === (list === "own"));
+      const sorted = want.map(s => mine.find(y => y.s === s)).filter(Boolean).concat(mine.filter(y => !want.includes(y.s)));
+      let i = 0; stocks = stocks.map(y => (y.list === "own") === (list === "own") ? sorted[i++] : y);
+      write("stocks", stocks); return push();
+    }
+    case "mark": {   // pin to the top of its list, or highlight
+      const y = stocks.find(z => z.s === m.s);
+      if (y && (m.k === "pin" || m.k === "hl")) { if (m.v) y[m.k] = true; else delete y[m.k]; write("stocks", stocks); }
+      return push();
+    }
     case "move": if (x) { x.list = m.v === "own" ? "own" : "watch"; if (x.list === "own" && !x.sh) await editHolding(x); saveAll(); push(); saveWidget(widgetSnapshot()); } return;
     case "remove":
       if (!x) return;
@@ -2167,6 +2179,7 @@ function clientApp() {
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
   let newsOpen = null; const tl = {};
+  let arrange = false;   // Arrange mode on the Portfolio or Watchlist tab
   let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null, ckProg = null, ckShown = 0, ckTimer = null; const ckEdit = {};
   let introState = null;   // "big" on the first launches, then "shrunk" a few seconds later
   let stratEditing = null; const stratEdit = { text: "", when: "" }, sgEdit = {};
@@ -2619,12 +2632,13 @@ function clientApp() {
   function sortRows(items) {
     const val = x => x.list === "own" && x.sh && x.price != null ? (posHome(x) != null ? posHome(x) : x.sh * x.price) : -1;
     const rank = { buy: 0, hold: 1, sell: 2 };
-    const k = tab === "watch" && sort === "value" ? "today" : sort;
-    return items.slice().sort((a, b) =>
-      k === "value" ? val(b) - val(a) || a.s.localeCompare(b.s)
+    const k = arrange ? "mine" : tab === "watch" && sort === "value" ? "today" : sort;
+    return items.slice().sort((a, b) => (!!b.pin - !!a.pin) || (   // pinned stocks first, in any order
+      k === "mine" ? (a.idx - b.idx)
+      : k === "value" ? val(b) - val(a) || a.s.localeCompare(b.s)
       : k === "today" ? (dayPct(b) == null ? -1e9 : dayPct(b)) - (dayPct(a) == null ? -1e9 : dayPct(a))
       : k === "signal" ? (a.sig ? rank[a.sig.signal] : 3) - (b.sig ? rank[b.sig.signal] : 3) || a.s.localeCompare(b.s)
-      : a.s.localeCompare(b.s));
+      : a.s.localeCompare(b.s)));
   }
   function listHTML() {
     if (!S.stocks.length) return `<section class="empty"><svg class="empty-mark" viewBox="0 0 240 240" aria-hidden="true">${window.__LOGO}</svg>
@@ -2633,9 +2647,11 @@ function clientApp() {
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
     const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + briefHTML() : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
-    const sorts = (tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
+    const sorts = [["mine", "Mine"]].concat(tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
-    return head + `<div class="listbar"><span>${items.length} ${tab === "own" ? "owned" : "watching"}</span><div class="seg">${sorts.map(([v, l]) => `<button class="${cur === v ? "on" : ""}" data-act="sort" data-v="${v}">${l}</button>`).join("")}</div></div>
+    if (arrange) return head + `<div class="listbar arr-bar"><span>Drag ≡ to move · 📌 pins to the top · ★ highlights</span><button class="sm primary" data-act="arrange" data-v="0">Done</button></div>
+      <div class="rows arr-rows" data-list="${tab === "own" ? "own" : "watch"}">${sortRows(items).map(arrRow).join("")}</div>`;
+    return head + `<div class="listbar"><span>${items.length} ${tab === "own" ? "owned" : "watching"} <button class="link small" data-act="arrange" data-v="1">Arrange</button></span><div class="seg">${sorts.map(([v, l]) => `<button class="${cur === v ? "on" : ""}" data-act="sort" data-v="${v}">${l}</button>`).join("")}</div></div>
       <div class="rows">${sortRows(items).map(row).join("")}</div>`;
   }
   // What you put into a position and what it has made or lost, in your currency (the price paid at today's rate).
@@ -2678,13 +2694,75 @@ function clientApp() {
     const sg = v => (v >= 0 ? "+" : "−") + money(Math.abs(v), cur, Math.abs(v) >= 10000, Math.abs(v) >= 10000 ? null : 0);
     return `<small class="r-pl">Invested ${P(money(i2, cur, true))} · <span class="${cls(g)}">${P(sg(g))} (${pct(g / i2 * 100, 1)})</span></small>`;
   }
+  // Arrange: drag rows by ≡ into your own order, pin to the top, highlight. Long-pressing a row also starts it.
+  const PIN_I = `<svg class="pin-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3l6 6-3 1-4 4 .5 4.5L13 20l-4-4-5 5-1-1 5-5-4-4 1.5-1.5L10 10l4-4z" fill="currentColor"/></svg>`;
+  function arrRow(x) {
+    return `<div class="row arr ${x.hl ? "hl" : ""} ${x.pin ? "pinned" : ""}" data-v="${esc(x.s)}">
+      <button class="drag-h" aria-label="Move ${esc(x.s)}">≡</button>
+      <div class="r-l"><b class="sym">${esc(x.s)}${x.pin ? PIN_I : ""}${x.hl ? `<span class="hl-star">★</span>` : ""}</b><small>${esc(x.name)}</small></div>
+      <div class="arr-btns"><button class="arr-b ${x.pin ? "on" : ""}" data-act="mark" data-k="pin" data-v="${esc(x.s)}" aria-pressed="${x.pin}" aria-label="${x.pin ? "Unpin" : "Pin to the top"}">${PIN_I}</button>
+        <button class="arr-b star ${x.hl ? "on" : ""}" data-act="mark" data-k="hl" data-v="${esc(x.s)}" aria-pressed="${x.hl}" aria-label="${x.hl ? "Remove highlight" : "Highlight"}">★</button></div></div>`;
+  }
+  let drag = null, pressT = null, pressAt = null, swallowClick = 0;
+  function startArrange() {
+    if (sort !== "mine") {   // start from the order on screen, so nothing jumps
+      const which = tab === "own" ? "own" : "watch", shown = sortRows(S.stocks.filter(y => (y.list === "own") === (which === "own")));
+      let i = 0; S.stocks = S.stocks.map(y => (y.list === "own") === (which === "own") ? shown[i++] : y);
+      S.stocks.forEach((y, j) => { y.idx = j; });
+      send("reorder", { v: which, order: shown.map(y => y.s) });
+      sort = "mine"; send("set", { k: "sort", v: "mine" });
+    }
+    arrange = true; render();
+  }
+  document.addEventListener("pointerdown", e => {
+    if (swallowClick && Date.now() - swallowClick > 300) swallowClick = 0;   // a new tap: nothing left to swallow
+    const h = e.target.closest && e.target.closest(".drag-h");
+    if (h && arrange) {
+      const el = h.closest(".row"), r = el.getBoundingClientRect();
+      drag = { el, list: el.parentElement, grab: e.clientY - r.top, y: e.clientY };
+      el.classList.add("dragging"); try { h.setPointerCapture(e.pointerId); } catch (x) {}
+      e.preventDefault(); return;
+    }
+    const row = !arrange && e.target.closest && e.target.closest(".rows .row[data-act='open']");
+    if (row && (tab === "own" || tab === "watch")) {   // long-press a row: Arrange
+      pressAt = { x: e.clientX, y: e.clientY };
+      pressT = setTimeout(() => { pressT = null; swallowClick = Date.now(); startArrange(); if (navigator.vibrate) navigator.vibrate(10); }, 550);
+    }
+  });
+  document.addEventListener("pointermove", e => {
+    if (pressT && pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 8) { clearTimeout(pressT); pressT = null; }
+    if (!drag) return;
+    e.preventDefault(); drag.y = e.clientY;
+    const el = drag.el, sibs = [...drag.list.children].filter(r => r !== el);
+    el.style.transform = "";
+    let before = null;
+    for (const r of sibs) { const b = r.getBoundingClientRect(); if (e.clientY < b.top + b.height / 2) { before = r; break; } }
+    if (before !== el.nextElementSibling) drag.list.insertBefore(el, before);
+    const top = el.getBoundingClientRect().top;
+    el.style.transform = `translateY(${e.clientY - drag.grab - top}px)`;
+    if (e.clientY < 90) window.scrollBy(0, -12); else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 12);
+  }, { passive: false });
+  const endDrag = () => {
+    if (pressT) { clearTimeout(pressT); pressT = null; }
+    if (!drag) return;
+    const { el, list } = drag; drag = null;
+    el.classList.remove("dragging"); el.style.transform = "";
+    const order = [...list.querySelectorAll(".row[data-v]")].map(r => r.dataset.v), which = list.dataset.list;
+    const pos = {}; order.forEach((s, i) => { pos[s] = i; });   // the page follows at once; Stockit saves it
+    const mine = S.stocks.filter(y => (y.list === "own") === (which === "own")).sort((a, b) => pos[a.s] - pos[b.s]);
+    let i = 0; S.stocks = S.stocks.map(y => (y.list === "own") === (which === "own") ? mine[i++] : y);
+    S.stocks.forEach((y, j) => { y.idx = j; });
+    send("reorder", { v: which, order });
+  };
+  document.addEventListener("pointerup", endDrag); document.addEventListener("pointercancel", endDrag);
+  document.addEventListener("click", e => { if (swallowClick && Date.now() - swallowClick < 1500) { e.stopPropagation(); e.preventDefault(); } swallowClick = 0; }, true);   // only the click that ends the long-press
   function row(x) {
     const d = dayPct(x), c = cls(d);
     const ph = posHome(x), sub = x.list === "own" && x.sh && x.price != null ? (priv() ? `${P("")} shares · ${P("")}` : `${nf(x.sh, x.sh % 1 ? 2 : 0)} shares · ${ph != null ? money(ph, HOME(), true) : money(x.sh * x.price, x.cur, true)}`) : esc(x.name);
     const sig = x.sig ? `<div class="r-sig">${sigChip(x.sig)}<span>${esc(x.sig.line)}</span></div>`
       : x.trend ? `<div class="r-sig"><span class="chip ex">${TREND[x.trend.trend]} · no AI</span></div>` : "";
-    return `<div class="row" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
-      <div class="r-l"><b class="sym">${esc(x.s)}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${sessionLines(x)}${investedLine(x)}${mkBadge(x)}</div>
+    return `<div class="row ${x.hl ? "hl" : ""}" role="button" tabindex="0" data-act="open" data-v="${esc(x.s)}">
+      <div class="r-l"><b class="sym">${esc(x.s)}${x.pin ? PIN_I : ""}${x.hl ? `<span class="hl-star">★</span>` : ""}</b><small>${x.err && x.price == null ? `<span class="danger">Couldn't load</span>` : sub}</small>${sessionLines(x)}${investedLine(x)}${mkBadge(x)}</div>
       ${spark((x.pts || []).slice(-23), c)}
       <div class="r-r"><b>${money(x.price, x.cur)}</b><span class="pill ${c}">${pct(d)}</span></div>${sig}</div>`;
   }
@@ -2976,6 +3054,8 @@ function clientApp() {
     return `<section class="manage"><h3 class="sec">Manage</h3><div class="aic-btns">
       ${x.list === "own" ? `<button class="sm" data-act="holding" data-v="${esc(x.s)}">Edit shares</button><button class="sm" data-act="move" data-v="watch" data-s="${esc(x.s)}">Move to watchlist</button>`
         : `<button class="sm primary" data-act="move" data-v="own" data-s="${esc(x.s)}">I own this</button>`}
+      <button class="sm" data-act="mark" data-k="pin" data-v="${esc(x.s)}">${x.pin ? "Unpin" : "📌 Pin to the top"}</button>
+      <button class="sm" data-act="mark" data-k="hl" data-v="${esc(x.s)}">${x.hl ? "Remove highlight" : "★ Highlight"}</button>
       <button class="sm danger ${rmArmed === x.s ? "armed" : ""}" data-act="remove" data-v="${esc(x.s)}">${rmArmed === x.s ? "Confirm" : "Remove"}</button></div></section>`;
   }
 
@@ -3993,8 +4073,10 @@ function clientApp() {
     if (readAloudAct(act, t, e)) return;   // read aloud: player, text view and Settings › Listening
     if (readerAct(act, t, e)) return;   // the reader: Done, Listen, Ask AI, Original
     switch (act) {
-      case "tab": if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
+      case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
+      case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
+      case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
       case "refresh": if (!progress) send("refresh", { force: true }); break;
       case "newsopen": openNews(t.dataset.s, v); break;
       case "fold": setFold([v], t.dataset.on === "1"); break;
@@ -4763,6 +4845,21 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .rd-trace{margin-top:12px;font-size:calc(12.5px * var(--ts));color:var(--muted);text-align:left}
 .rd-trace summary{font-weight:700;color:var(--signal)}
 .rd-trace ol{margin:6px 0 0;padding-left:1.3em} .rd-trace li{margin:3px 0;-webkit-user-select:text;user-select:text}
+/* Arrange: your order, pins and highlights */
+.pin-i{width:14px;height:14px;margin-left:5px;vertical-align:-1px;color:var(--signal)}
+.hl-star{margin-left:5px;color:var(--amber);font-size:.85em}
+.row.hl{background:color-mix(in srgb, var(--amber) 9%, var(--sheet));box-shadow:inset 4px 0 0 var(--amber)}
+.arr-bar span{font-size:calc(12.5px * var(--ts))}
+.row.arr{display:flex;align-items:center;gap:10px;grid-template-columns:none;cursor:default;touch-action:pan-y;transition:box-shadow .15s}
+.row.arr .r-l{flex:1;min-width:0}
+.row.arr .r-l small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.drag-h{width:40px;height:44px;flex:none;font-size:24px;line-height:1;color:var(--muted);touch-action:none;cursor:grab;border-radius:8px}
+.row.dragging{position:relative;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.25);background:var(--paper)}
+.row.dragging .drag-h{cursor:grabbing;color:var(--signal)}
+.arr-btns{display:flex;gap:6px;flex:none}
+.arr-b{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;color:var(--muted);background:var(--sheet);box-shadow:inset 0 0 0 1px var(--rule);font-size:18px}
+.arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
+.arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
