@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.20.2';
+const VERSION = '1.20.3';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -2715,20 +2715,20 @@ function clientApp() {
     if (!sh || !SHEET_CLOSE[sh.id]) return;
     const fromHead = !!e.target.closest(".sh-head");
     if (!fromHead && (sh.scrollTop > 0 || e.target.closest(".chart, input, textarea, select, .seg, .rd-ask"))) return;
-    pull = { sh, y0: e.touches[0].clientY, x0: e.touches[0].clientX, t: Date.now(), y: e.touches[0].clientY, v: 0, dy: 0, on: false, fromHead };
+    pull = { sh, y0: e.touches[0].clientY, x0: e.touches[0].clientX, t0: Date.now(), t: Date.now(), y: e.touches[0].clientY, v: 0, dy: 0, on: false, fromHead };
   }, { passive: true });
   document.addEventListener("touchmove", e => {
     if (!pull) return;
     const t = e.touches[0], dy = t.clientY - pull.y0, dx = t.clientX - pull.x0;
     if (!pull.on) {
       if (dy < -6 || Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) { pull = null; return; }   // scrolling up, or sideways
-      if (dy < 8) return;
+      if (dy < 6) return;
       if (!pull.fromHead && pull.sh.scrollTop > 0) { pull = null; return; }
       pull.on = true; pull.sh.style.transition = "none"; pull.sh.classList.add("pulling");
     }
     e.preventDefault();
-    const now = Date.now(); pull.v = (t.clientY - pull.y) / Math.max(1, now - pull.t); pull.t = now; pull.y = t.clientY;
-    pull.dy = Math.max(0, dy - 8);
+    const now = Date.now(); pull.v = 0.5 * pull.v + 0.5 * (t.clientY - pull.y) / Math.max(1, now - pull.t); pull.t = now; pull.y = t.clientY;
+    pull.dy = Math.max(0, dy - 6);
     pull.sh.style.transform = `translateY(${pull.dy}px)`;
   }, { passive: false });
   const endPull = cancel => {
@@ -2736,7 +2736,8 @@ function clientApp() {
     const p = pull; pull = null;
     if (!p.on) return;
     p.sh.style.transition = ""; p.sh.classList.remove("pulling");
-    if (!cancel && (p.dy > 130 || (p.dy > 40 && p.v > 0.5))) {
+    const avg = p.dy / Math.max(1, Date.now() - p.t0);   // px per ms over the whole pull
+    if (!cancel && (p.dy > 40 || (p.dy > 12 && Math.max(avg, p.v) > 0.12))) {   // a slight pull, or a short flick, is enough
       p.sh.style.transform = "translateY(102%)";
       setTimeout(() => { const f = SHEET_CLOSE[p.sh.id]; p.sh.style.transform = ""; if (f) f(); }, 270);
     } else p.sh.style.transform = "";
