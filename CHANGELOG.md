@@ -2,6 +2,23 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.22.0 (2026-11-05): What insiders are doing
+
+- 🏛 **Insider trades**: With a Quiver key, see what officers, directors and big owners bought and sold (SEC Form 4).
+- ✦ **Sharper views and ideas**: Stockit's view, AI stories and ideas now weigh insider buying, read against the price trend.
+- 💡 **Ideas from insider buying**: Big open-market purchases across the market become idea candidates.
+
+**Changes**
+
+- Settings › News and signals: Quiver key (kept in the Keychain) and an Insider trades switch; Settings › Insider trades: days counted (90), how often to check (12 h), what a big purchase is ($100,000)
+- For each US stock, the last 90 days of Form 4 filings: open-market purchases and sales counted (with buyers, value, an executive or 10% owner, and how much the largest purchase grew that insider's stake); grants, option exercises, tax withholding and gifts listed but not counted
+- Key numbers: Insiders, 90 days (Buying, Some buying, Selling, Quiet), with an explanation; a new Insider trades section lists the filings
+- Stockit's view (AI or trend) adds what insiders did, read against the 200-day average: buying in an uptrend, buying into a decline, or selling
+- Every AI briefing, story and view gets the insider facts with the research rule of thumb (purchases over sales, uptrend over decline)
+- ✦ Ideas consider the latest big open-market purchases across the market, and each idea shows its insider activity
+- Flash cards show Insiders buying or Insiders selling when it matters; ticker strings like (NASDAQ:AAPL) are cleaned; non-US listings are skipped
+- A key without insider access (Quiver's Hobbyist plan) is reported in Settings
+
 ## 1.21.1 (2026-11-04): Built with Widgets 1.1.0
 
 

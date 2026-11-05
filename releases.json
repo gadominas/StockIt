@@ -4,6 +4,38 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.22.0",
+      "date": "2026-11-05",
+      "title": "What insiders are doing",
+      "highlights": [
+        {
+          "icon": "🏛",
+          "title": "Insider trades",
+          "text": "With a Quiver key, see what officers, directors and big owners bought and sold (SEC Form 4)."
+        },
+        {
+          "icon": "✦",
+          "title": "Sharper views and ideas",
+          "text": "Stockit's view, AI stories and ideas now weigh insider buying, read against the price trend."
+        },
+        {
+          "icon": "💡",
+          "title": "Ideas from insider buying",
+          "text": "Big open-market purchases across the market become idea candidates."
+        }
+      ],
+      "changes": [
+        "Settings › News and signals: Quiver key (kept in the Keychain) and an Insider trades switch; Settings › Insider trades: days counted (90), how often to check (12 h), what a big purchase is ($100,000)",
+        "For each US stock, the last 90 days of Form 4 filings: open-market purchases and sales counted (with buyers, value, an executive or 10% owner, and how much the largest purchase grew that insider's stake); grants, option exercises, tax withholding and gifts listed but not counted",
+        "Key numbers: Insiders, 90 days (Buying, Some buying, Selling, Quiet), with an explanation; a new Insider trades section lists the filings",
+        "Stockit's view (AI or trend) adds what insiders did, read against the 200-day average: buying in an uptrend, buying into a decline, or selling",
+        "Every AI briefing, story and view gets the insider facts with the research rule of thumb (purchases over sales, uptrend over decline)",
+        "✦ Ideas consider the latest big open-market purchases across the market, and each idea shows its insider activity",
+        "Flash cards show Insiders buying or Insiders selling when it matters; ticker strings like (NASDAQ:AAPL) are cleaned; non-US listings are skipped",
+        "A key without insider access (Quiver's Hobbyist plan) is reported in Settings"
+      ]
+    },
+    {
       "version": "1.21.1",
       "date": "2026-11-04",
       "title": "Built with Widgets 1.1.0",
