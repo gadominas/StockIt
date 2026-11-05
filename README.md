@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.20.3-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.21.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -319,20 +319,29 @@ Choose the voice in **Settings › Listening**:
 ## Home-screen widget
 
 <p align="center">
-  <img src="docs/screenshots/widget-medium.png" width="338" alt="Medium widget: your portfolio's move today beside the three biggest movers with their views">&nbsp;&nbsp;
-  <img src="docs/screenshots/widget-small.png" width="158" alt="Small widget: your portfolio's move today">
+  <img src="docs/screenshots/widget-medium.png" width="338" alt="Medium widget: today's move and eight tickers in two columns">&nbsp;&nbsp;
+  <img src="docs/screenshots/widget-small.png" width="158" alt="Small widget: today's move and four tickers">
 </p>
 <p align="center">
-  <img src="docs/screenshots/widget-large.png" width="338" alt="Large widget: the portfolio's move, the briefing headline and the biggest movers">
+  <img src="docs/screenshots/widget-large.png" width="338" alt="Large widget: the portfolio's move, the briefing headline and eight stocks with price and view">
 </p>
-<p align="center"><sub><b>Medium</b>: today's move and the biggest movers · <b>Small</b>: today's move · <b>Large</b>: adds the ✦ briefing headline</sub></p>
+<p align="center"><sub><b>Medium</b>: today's move and 8 tickers · <b>Small</b>: 4 tickers · <b>Large</b>: 8 stocks with price and ✦ view, and the briefing headline</sub></p>
 
 1. Long-press your Home Screen, tap **Edit → Add Widget**, choose **Scriptable**, and pick a size.
-2. Long-press the new widget, tap **Edit Widget**, and set **Script** to *Stockit*.
+2. Long-press the new widget, tap **Edit Widget**, and set **Script** to *Stockit*. To keep amounts off this widget for good, set **Parameter** to *private*.
 
-The widget shows the Stockit logo and name and your portfolio's move today (or your watchlist's, before you own anything). The medium widget lists your three biggest movers beside it, with their price and view; the large one adds the latest ✦ briefing headline and more rows. Tapping opens Stockit. The bottom line says when prices were loaded, and turns amber (**⟳ Updated …**) when that is older than 12 hours. Lock Screen widgets show today's move as text.
+**Which stocks it shows.** Pin up to 8 stocks to the widget, from your portfolio or your watchlist: tap **▦** in **Arrange** (next to the stock count, or long-press a stock), or **▦ Show on the widget** on a stock's page. Pinned stocks show in your own order. With nothing pinned, the widget shows your best performers today from your portfolio, or from your watchlist if you own nothing yet. **Settings › Portfolio › Stocks on the widget** lists the pinned ones; tap one to take it off.
 
-The widget **shows percentages only**, never amounts of money, because it sits on an unlocked Home Screen. Turn on **Settings › Portfolio › Show portfolio value in the widget** if you want the value too.
+**Compact.** The medium widget fits 8 tickers in two columns under one summary line; the small one 4; the large one 8 with their price and ✦ view, under today's move and the ✦ briefing headline.
+
+**Amounts.** The widget shows percentages only, never amounts of money, unless you turn on **Settings › Portfolio › Show portfolio value in the widget**. Privacy mode (the eye) hides them on the widget too.
+
+**Hide amounts without opening Stockit.** iPhone apps can't use the volume buttons for their own actions, so use **Back Tap** instead:
+
+1. In **Shortcuts**, make a shortcut with Scriptable's **Run Script**: script *Stockit*, parameter *hide*. Make a second one with the parameter *show*. (Turn off **Show When Run** in both.)
+2. In **Settings › Accessibility › Touch › Back Tap**, set **Double Tap** to the *hide* shortcut and **Triple Tap** to the *show* one. On an iPhone with an Action Button, it can run the *hide* shortcut too.
+
+That switches Stockit's privacy mode on or off: the app hides amounts at once, and the widget at its next refresh, which iOS times (usually within minutes). For a widget that should never show amounts, use the *private* parameter above. The parameter *privacy toggle* switches back and forth, and `scriptable:///run/Stockit?privacy=on` (or `off`) works from anywhere that opens links.
 
 It reloads prices itself when they are older than 30 minutes, within 15 seconds, and otherwise shows what Stockit last saved; it never calls AI. Change these times in **Settings › Widget**.
 

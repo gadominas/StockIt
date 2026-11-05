@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.20.3';
+const VERSION = '1.21.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1781,7 +1781,7 @@ function clientState() {
   const view = x => {
       const m = market[x.s] || {};
       return {
-        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, idx: stocks.indexOf(x),
+        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, idx: stocks.indexOf(x),
         price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
         st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
@@ -1982,7 +1982,7 @@ async function handle(m) {
     }
     case "mark": {   // pin to the top of its list, or highlight
       const y = stocks.find(z => z.s === m.s);
-      if (y && (m.k === "pin" || m.k === "hl")) { if (m.v) y[m.k] = true; else delete y[m.k]; write("stocks", stocks); }
+      if (y && (m.k === "pin" || m.k === "hl" || m.k === "wpin")) { if (m.v) y[m.k] = true; else delete y[m.k]; write("stocks", stocks); if (m.k === "wpin") saveWidget(widgetSnapshot()); }
       return push();
     }
     case "move": if (x) { x.list = m.v === "own" ? "own" : "watch"; if (x.list === "own" && !x.sh) await editHolding(x); saveAll(); push(); saveWidget(widgetSnapshot()); } return;
@@ -2654,7 +2654,7 @@ function clientApp() {
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = [["mine", "Mine"]].concat(tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
-    if (arrange) return head + `<div class="listbar arr-bar"><span>Drag ≡ to move · 📌 pins to the top · ★ highlights</span><button class="sm primary" data-act="arrange" data-v="0">Done</button></div>
+    if (arrange) return head + `<div class="listbar arr-bar"><span>Drag ≡ to move · 📌 top of the list · ▦ on the widget · ★ highlight</span><button class="sm primary" data-act="arrange" data-v="0">Done</button></div>
       <div class="rows arr-rows" data-list="${tab === "own" ? "own" : "watch"}">${sortRows(items).map(arrRow).join("")}</div>`;
     return head + `<div class="listbar"><span>${items.length} ${tab === "own" ? "owned" : "watching"} <button class="link small" data-act="arrange" data-v="1">Arrange</button></span><div class="seg">${sorts.map(([v, l]) => `<button class="${cur === v ? "on" : ""}" data-act="sort" data-v="${v}">${l}</button>`).join("")}</div></div>
       <div class="rows">${sortRows(items).map(row).join("")}</div>`;
@@ -2746,12 +2746,21 @@ function clientApp() {
   document.addEventListener("touchcancel", () => endPull(true));
 
   // Arrange: drag rows by ≡ into your own order, pin to the top, highlight. Long-pressing a row also starts it.
+  const WID_I = `<svg class="pin-i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="2" fill="currentColor"/><rect x="13" y="3" width="8" height="8" rx="2" fill="currentColor" opacity=".55"/><rect x="3" y="13" width="8" height="8" rx="2" fill="currentColor" opacity=".55"/><rect x="13" y="13" width="8" height="8" rx="2" fill="currentColor"/></svg>`;
   const PIN_I = `<svg class="pin-i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3l6 6-3 1-4 4 .5 4.5L13 20l-4-4-5 5-1-1 5-5-4-4 1.5-1.5L10 10l4-4z" fill="currentColor"/></svg>`;
+  function widgetPicksHTML() {
+    const pins = S.stocks.filter(x => x.wpin).sort((a, b) => a.idx - b.idx);
+    return `<div class="srow col"><b>Stocks on the widget</b>
+      <small class="muted">${pins.length ? `${pins.length} pinned, in your order${pins.length > 8 ? " (the first 8 show)" : ""}: ` + pins.map(x => `<button class="chip wchip" data-act="mark" data-k="wpin" data-v="${esc(x.s)}" aria-label="Remove ${esc(x.s)} from the widget">${esc(x.s)} ×</button>`).join(" ")
+        : "None pinned, so it shows your best performers today (from the watchlist when you own none). Pin up to 8 with ▦ in Arrange or on a stock's page."}</small>
+      <small class="muted">Hide amounts without opening Stockit: in Shortcuts, add Scriptable's Run Script for Stockit with the parameter <b>hide</b> (or <b>show</b>), then choose it in Settings › Accessibility › Touch › Back Tap (Double Tap to hide, Triple Tap to show), or for the Action Button. A widget whose parameter is <b>private</b> never shows amounts.</small></div>`;
+  }
   function arrRow(x) {
     return `<div class="row arr ${x.hl ? "hl" : ""} ${x.pin ? "pinned" : ""}" data-v="${esc(x.s)}">
       <button class="drag-h" aria-label="Move ${esc(x.s)}">≡</button>
       <div class="r-l"><b class="sym">${esc(x.s)}${x.pin ? PIN_I : ""}${x.hl ? `<span class="hl-star">★</span>` : ""}</b><small>${esc(x.name)}</small></div>
       <div class="arr-btns"><button class="arr-b ${x.pin ? "on" : ""}" data-act="mark" data-k="pin" data-v="${esc(x.s)}" aria-pressed="${x.pin}" aria-label="${x.pin ? "Unpin" : "Pin to the top"}">${PIN_I}</button>
+        <button class="arr-b wid ${x.wpin ? "on" : ""}" data-act="mark" data-k="wpin" data-v="${esc(x.s)}" aria-pressed="${x.wpin}" aria-label="${x.wpin ? "Remove from the widget" : "Show on the widget"}">${WID_I}</button>
         <button class="arr-b star ${x.hl ? "on" : ""}" data-act="mark" data-k="hl" data-v="${esc(x.s)}" aria-pressed="${x.hl}" aria-label="${x.hl ? "Remove highlight" : "Highlight"}">★</button></div></div>`;
   }
   let drag = null, pressT = null, pressAt = null, swallowClick = 0;
@@ -3107,6 +3116,7 @@ function clientApp() {
         : `<button class="sm primary" data-act="move" data-v="own" data-s="${esc(x.s)}">I own this</button>`}
       <button class="sm" data-act="mark" data-k="pin" data-v="${esc(x.s)}">${x.pin ? "Unpin" : "📌 Pin to the top"}</button>
       <button class="sm" data-act="mark" data-k="hl" data-v="${esc(x.s)}">${x.hl ? "Remove highlight" : "★ Highlight"}</button>
+      <button class="sm" data-act="mark" data-k="wpin" data-v="${esc(x.s)}">${x.wpin ? "Remove from the widget" : "▦ Show on the widget"}</button>
       <button class="sm danger ${rmArmed === x.s ? "armed" : ""}" data-act="remove" data-v="${esc(x.s)}">${rmArmed === x.s ? "Confirm" : "Remove"}</button></div></section>`;
   }
 
@@ -3188,6 +3198,7 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Show your money in</b><small class="muted">Portfolio value, today and gains, here and in the widget. Stocks in other currencies are converted at today's rate. ${S.fx && S.fx.choice === "auto" ? `Auto uses the currency most of your money is in (now ${esc(HOME())}).` : ""}</small></div>
         <select id="homeCur" class="cursel" aria-label="Currency">${[["auto", "Auto"]].concat(((S.fx && S.fx.curs) || []).map(c2 => [c2, c2])).map(([v, l]) => `<option value="${v}" ${(S.fx && S.fx.choice) === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${sw("widgetMoney", "Show portfolio value in the widget", "Off: the widget shows only percentages, never amounts")}
+      ${widgetPicksHTML()}
       <h3 class="sec">News and signals</h3>
       ${sw("newsYahoo", "Yahoo Finance headlines", "Business news about each stock")}
       ${sw("newsWeb", "Headlines from the web", "Wider coverage through Google News, including blogs and big newspapers")}
@@ -4127,7 +4138,7 @@ function clientApp() {
       case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
-      case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
+      case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : k === "wpin" ? (y[k] ? `${v} is on the widget` : `${v} left the widget`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
       case "refresh": if (!progress) send("refresh", { force: true }); break;
       case "newsopen": openNews(t.dataset.s, v); break;
       case "fold": setFold([v], t.dataset.on === "1"); break;
@@ -4914,7 +4925,8 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .arr-btns{display:flex;gap:6px;flex:none}
 .arr-b{width:40px;height:40px;border-radius:20px;display:grid;place-items:center;color:var(--muted);background:var(--sheet);box-shadow:inset 0 0 0 1px var(--rule);font-size:18px}
 .arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
-.arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)}
+.arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)} .arr-b.wid.on{background:var(--up)}
+.srow.col{flex-direction:column;align-items:flex-start;gap:4px} .wchip{margin:2px 2px 0 0;font-size:calc(12px * var(--ts))}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
@@ -5051,18 +5063,23 @@ window.__boot = function (st) {
 // portfolio value only when "Show portfolio value in the widget" is on. Saved after refreshes, edits and new AI text.
 function widgetSnapshot(pricesAt) {
   const tot = totals()[0] || null;
-  const rows = stocks.map(x => {
+  const all = stocks.map(x => {
     const m = market[x.s] || {}, sg = sigFor(x.s);
-    return { s: x.s, own: x.list === "own", chg: dayPct(m), price: m.price, cur: m.cur || "", sig: sg ? sg.signal : "" };
-  }).filter(r => r.chg != null);
+    return { s: x.s, own: x.list === "own", chg: dayPct(m), price: m.price, cur: m.cur || "", sig: sg ? sg.signal : "", wpin: !!x.wpin };
+  });
+  const rows = all.filter(r => r.chg != null);
   const own = rows.filter(r => r.own), base = own.length ? own : rows;
+  // The widget's stocks: the ones you pinned to it (in your order), else your best performers today, else your watchlist's
+  const pinned = all.filter(r => r.wpin), best = base.slice().sort((a, b2) => b2.chg - a.chg);
   const avg = base.length ? base.reduce((a, r) => a + r.chg, 0) / base.length : null;
   const b = insights.briefing;
   return {
     n: stocks.length, owned: stocks.filter(x => x.list === "own").length, scope: own.length ? "own" : "watch",
     dayPct: tot && tot.value - tot.day ? tot.day / (tot.value - tot.day) * 100 : avg,
     value: tot && settings.widgetMoney && !settings.privacy ? { v: tot.value, day: tot.day, cur: tot.cur } : null,   // privacy mode hides it here too
-    movers: base.slice().sort((a, b2) => Math.abs(b2.chg) - Math.abs(a.chg)).slice(0, 6),
+    movers: (pinned.length ? pinned : best).slice(0, 8),
+    pick: pinned.length ? "pinned" : own.length ? "best-own" : "best-watch",
+    private: !!settings.privacy,   // privacy mode (the eye, or a Back Tap shortcut): amounts hidden on the widget too
     headline: b && Date.now() - b.at < 48 * 3600e3 ? b.headline : "",
     prices: pricesAt || settings.lastRefresh || 0,
   };
@@ -5090,15 +5107,21 @@ async function widgetModel(param, family) {
   const rows = (d.headline && family === "large" ? [{ icon: "✦", text: d.headline, lines: 2 }] : [])
     .concat((d.movers || []).map(r => ({ icon: r.chg >= 0 ? "▲" : "▼", text: `${r.s}  ${wPct(r.chg)}`, tone: tone(r.chg),
       sub: [r.price != null ? (MINOR[r.cur] ? r.price.toFixed(2) + "p" : wMoney(r.price, r.cur)) : "", r.sig ? "✦ " + r.sig[0].toUpperCase() + r.sig.slice(1) : ""].filter(Boolean).join("  ") })));
+  const hide = d.private || /priv|hide|mask/i.test(String(param || ""));
+  const cells = (d.movers || []).map(r => ({ s: r.s.replace(/\.(DE|F|L|PA|AS|MI|TO|V|SW|ST|OL|CO|HE|VI|BR|MC|LS|T|HK|AX)$/, "").slice(0, 8),
+    pct: wPct(r.chg), tone: tone(r.chg), price: r.price != null ? (MINOR[r.cur] ? r.price.toFixed(2) + "p" : wMoney(r.price, r.cur)) : "",
+    sig: r.sig ? r.sig[0].toUpperCase() + r.sig.slice(1) : "" }));
   const kicker = d.scope === "own" ? "Your portfolio today" : "Your watchlist today";
   const footer = d.prices ? "Prices " + wWhen(d.prices) : "";
   const accessory = { glyph: d.dayPct >= 0 ? "▲" : "▼", inline: `${d.dayPct >= 0 ? "▲" : "▼"} ${wPct(d.dayPct)} today`, value: d.dayPct == null ? "–" : (d.dayPct >= 0 ? "+" : "") + d.dayPct.toFixed(1) };
-  if (d.value) {
+  const pickNote = d.pick === "pinned" ? "Your widget stocks" : d.pick === "best-own" ? "Best today" : "Best on your watchlist";
+  const headline = d.headline && family === "large" ? d.headline : "";
+  if (d.value && !hide) {
     return { badge: wPct(d.dayPct), badgeTone: tone(d.dayPct), kicker, value: wMoney(d.value.v, d.value.cur, true),
-      caption: `${d.value.day >= 0 ? "+" : "−"}${wMoney(Math.abs(d.value.day), d.value.cur, true)} today`, rows, footer, at: d.prices, accessory };
+      caption: `${d.value.day >= 0 ? "+" : "−"}${wMoney(Math.abs(d.value.day), d.value.cur, true)} today`, rows, cells, pickNote, headline, footer, at: d.prices, accessory };
   }
   return { kicker, value: wPct(d.dayPct), valueTone: tone(d.dayPct), caption: d.scope === "own" ? `${d.owned} owned stock${d.owned === 1 ? "" : "s"}` : `${d.n} on your watchlist`,
-    rows, footer, at: d.prices, accessory };
+    rows, cells, pickNote, headline, footer: footer + (hide && d.value ? "  ·  amounts hidden" : ""), at: d.prices, accessory };
 }
 
 // ───────── Widget ─────────
@@ -5219,6 +5242,7 @@ async function renderWidget(m) {
   g.startPoint = new Point(0, 0); g.endPoint = new Point(0, 1);
   w.backgroundGradient = g;
   w.setPadding(14, 14, 14, 14);
+  if (m.cells && m.cells.length && fam === 'medium') w.setPadding(12, 14, 12, 14);   // room for 8 tickers
 
   // 1. Header: logo tile, name (highlighted part in the accent), badge
   const hd = w.addStack();
@@ -5249,6 +5273,8 @@ async function renderWidget(m) {
     Script.setWidget(w);
     return;
   }
+
+  if (m.cells && m.cells.length) { renderCells(w, m, fam); Script.setWidget(w); return; }
 
   // 2. Hero: kicker, then a big value with its caption, or a title with its caption
   const body = w.addStack();
@@ -5281,6 +5307,54 @@ async function renderWidget(m) {
   const ft = small ? (m.footer || m.badge) : m.footer;
   if (ft) wText(w, (m.stale ? '⟳ ' : '') + ft, 11, 'reg', m.stale ? 'warn' : 'muted');
   Script.setWidget(w);
+}
+
+// Compact layout with ticker cells (Stockit 1.21.0): small 4, medium 8 in two columns under a one-line summary,
+// large 8 one-line rows with price and signal under the usual hero.
+function wCell(stack, c, o) {
+  const row = stack.addStack();
+  row.centerAlignContent();
+  if (o.width) row.size = new Size(o.width, o.h || 0);
+  wText(row, c.s, o.size, 'semi', 'ink');
+  if (o.price && c.price) { row.addSpacer(6); wText(row, c.price, o.size - 1.5, 'reg', 'muted'); }
+  row.addSpacer();
+  if (o.sig && c.sig) { wText(row, '✦ ' + c.sig, o.size - 1.5, 'reg', 'muted'); row.addSpacer(8); }
+  wText(row, c.pct, o.size, 'semi', c.tone);
+}
+function renderCells(w, m, fam) {
+  const small = fam === 'small', medium = fam === 'medium';
+  if (medium) {   // one line: what the numbers are, the value (or the day's %), today
+    const top = w.addStack(); top.centerAlignContent();
+    wText(top, m.kicker || '', 11, 'semi', m.kickerTone || 'accent');
+    top.addSpacer(8);
+    wText(top, m.value || '', 13, 'bold', m.valueTone || 'ink');
+    if (m.badge && m.caption) { top.addSpacer(6); wText(top, m.caption, 11, 'reg', 'muted'); }
+    top.addSpacer();
+    w.addSpacer(7);
+    const cells = m.cells.slice(0, 8), half = Math.ceil(cells.length / 2), colW = 139;
+    for (let i = 0; i < half; i++) {
+      if (i) w.addSpacer(4);
+      const line = w.addStack(); line.centerAlignContent();
+      wCell(line, cells[i], { size: 12.5, width: colW });
+      line.addSpacer(14);
+      if (cells[i + half]) wCell(line, cells[i + half], { size: 12.5, width: colW });
+    }
+  } else if (small) {
+    wText(w, m.value || '', 26, 'bold', m.valueTone || 'ink');
+    w.addSpacer(5);
+    m.cells.slice(0, 4).forEach((c, i) => { if (i) w.addSpacer(3); wCell(w, c, { size: 12 }); });
+  } else {   // large
+    if (m.kicker) wText(w, m.kicker, 11, 'semi', m.kickerTone || 'accent');
+    wText(w, m.value || '', 36, 'bold', m.valueTone || 'ink');
+    if (m.caption) wText(w, m.caption, 13, 'semi', 'ink');
+    if (m.headline) { w.addSpacer(8); wText(w, '✦ ' + m.headline, 12, 'reg', 'soft', 2); }
+    w.addSpacer(10);
+    wText(w, (m.pickNote || '').toUpperCase(), 10, 'semi', 'muted');
+    w.addSpacer(4);
+    m.cells.slice(0, 8).forEach((c, i) => { if (i) w.addSpacer(4); wCell(w, c, { size: 13, price: true, sig: true }); });
+  }
+  w.addSpacer();
+  if (!small && m.footer) wText(w, (m.stale ? '⟳ ' : '') + m.footer, 10.5, 'reg', m.stale ? 'warn' : 'muted');
 }
 
 // Lock Screen: iOS tints these, so text only, no colours or logo.
@@ -5415,9 +5489,25 @@ async function main() {
 }
 
 // Settings are loaded at the top of the script (load("settings")), before every branch; data is read in each branch.
+// "privacy on", "privacy off" or "privacy toggle" from Shortcuts (Run Script's parameter) or the URL
+// scriptable:///run/Stockit?privacy=on: amounts hidden or shown in Stockit and on the widget, without opening Stockit.
+const privacyCmd = (() => {
+  const q = (args.queryParameters || {}).privacy, p = typeof args.shortcutParameter === "string" ? args.shortcutParameter : "";
+  const m = String(q != null ? "privacy " + q : p).toLowerCase().match(/^\s*(?:privacy|hide|show|mask|unmask)\b\s*(on|off|toggle)?/);
+  if (!m) return null;
+  if (/^\s*(hide|mask)/.test(p)) return "on";
+  if (/^\s*(show|unmask)/.test(p)) return "off";
+  return m[1] || "toggle";
+})();
 if (config.runsInWidget || config.runsInAccessoryWidget) {
   await loadData();
   await runWidget();             // never builds or presents a WebView, Alert or QuickLook
+} else if (privacyCmd) {
+  await loadData();              // never write before reading (safe-startup)
+  settings.privacy = privacyCmd === "toggle" ? !settings.privacy : privacyCmd === "on";
+  write("settings", settings);
+  saveWidget(widgetSnapshot());  // the widget shows it at its next refresh; iOS decides when that is
+  Script.setShortcutOutput(settings.privacy ? "Stockit amounts hidden" : "Stockit amounts showing");
 } else {
   await main();
 }
