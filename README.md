@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.21.1-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.22.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -132,6 +132,23 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## Insider trades
+
+<img src="docs/screenshots/39-insiders.png" width="250" align="right" alt="A stock's insider trades: purchases and sales in 90 days, a note on what they mean with the price trend, and each Form 4 filing">
+
+With a **Quiver** key (Settings › News and signals; insider data needs Quiver's Trader plan), Stockit reads what each US stock's officers, directors and 10% owners did with their own shares, from SEC Form 4 filings:
+
+- **Only real decisions count.** Purchases and sales on the open market are counted; grants, option exercises, tax withholding and gifts are listed but never counted, because they aren't choices about the stock.
+- **Insiders, 90 days** among a stock's key numbers: *Buying $1.3M*, *Selling $9.5M* or *Quiet* (tap it for what it means), and a list of the filings with name, role, type, shares and value.
+- **Stockit's view** adds what insiders did and reads it against the trend: purchases with the price above its 200-day average (the combination that has done best in Quiver's own five-year test), purchases into a decline (they may be early), or sales (which say less: they're often planned or for taxes).
+- **✦ AI** gets the same facts in every briefing, story and view, with the research rule of thumb, so it weighs purchases above sales.
+- **✦ Ideas** look at the latest open-market purchases across the whole market (big ones, by an executive or by a 10% owner) as candidates, and each idea shows its own insider activity.
+- **Flash** cards say *Insiders buying* or *Insiders selling* when it matters.
+
+How far back to count (90 days), how often to check (every 12 hours) and what counts as a big purchase ($100,000) are in **Settings › Insider trades**. Non-US listings are skipped: Form 4 covers US filers only.
+
+<br clear="right">
 
 ## Your order, pins and highlights
 
@@ -372,6 +389,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| See what insiders bought and sold | Add a Quiver key in **Settings › News and signals**, then open a US stock: **Insider trades** |
 | Move, pin or highlight a stock | **Arrange** next to the count (or long-press a stock): drag ≡, tap 📌 or ★ |
 | Hide your amounts for a demo | Tap the small **eye** beside **Updated**; tap again to show them |
 | Check Stockit against your broker | Tap the **✓ shield** on your portfolio, add screenshots, tap **Check**, then apply or ignore each suggestion |

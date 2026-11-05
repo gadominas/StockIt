@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Insider trades (SEC Form 4) through Quiver Quantitative with your own key: what insiders bought and sold, in signals, stories and ideas
  *  - Privacy mode: one tap on the eye hides your amounts (value, gains, shares, average prices) for demos
  *  - ✦ Suggested strategies from your portfolio, watchlist and plans, refreshed on a schedule you choose; keep any as your own, and edit every strategy
  *  - Check my portfolio: screenshots of your broker's app compared with Stockit, every difference a suggestion you apply or ignore
@@ -29,7 +30,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.21.1';
+const VERSION = '1.22.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -73,6 +74,7 @@ const AI = {
 const PROVIDERS = { anthropic: "Claude", openai: "OpenAI" };
 // Other secrets: each its own Keychain entry, typed into a native secure prompt, never in settings.json or the page.
 const SECRETS = { finnhub: { key: "STOCKIT_FINNHUB_KEY", name: "Finnhub key", hint: "Free at finnhub.io › Dashboard. Used only when Yahoo doesn't answer." },
+  quiver: { key: "STOCKIT_QUIVER_KEY", name: "Quiver key", hint: "From api.quiverquant.com › Dashboard. Insider trades need Quiver's Trader plan." },
   jina: { key: "STOCKIT_JINA_KEY", name: "Jina Reader key", hint: "Free at jina.ai (API key). Only needed when Jina Reader answers 401, 402 or 403 without one." } };
 const DAY = 864e5;
 const DEFAULT_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
@@ -85,6 +87,11 @@ const CONFIG = [
     { k: "pricesFreshMin", label: "Reload prices on open when older than", help: "0 reloads every time Stockit opens", unit: "min", def: 5, min: 0, max: 120, step: 5 },
     { k: "fundHours", label: "Reload company numbers every", help: "P/E, market cap, dividend and analyst views change slowly", unit: "h", def: 12, min: 1, max: 72, step: 1 },
     { k: "userAgent", label: "Browser identity", help: "The User-Agent sent to data sources; some block unknown apps", type: "text", def: DEFAULT_UA },
+  ]],
+  ["Insider trades", [
+    { k: "insidersDays", label: "Count insider trades from the last", help: "By the day they were filed with the SEC", unit: "days", def: 90, min: 30, max: 365, step: 15 },
+    { k: "insidersEveryH", label: "Check for new insider filings every", unit: "h", def: 12, min: 1, max: 48, step: 1 },
+    { k: "insidersBigBuy", label: "A purchase counts as big from", help: "In US dollars, all insiders together", unit: "$", def: 100000, min: 10000, max: 5000000, step: 10000 },
   ]],
   ["Headlines", [
     { k: "newsPerStock", label: "Headlines kept per stock", unit: "headlines", def: 10, min: 3, max: 25, step: 1 },
@@ -268,7 +275,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, insiders: true, checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -582,6 +589,82 @@ async function loadCrowd(sym) {
   m.crowd = { bull, bear, n: msgs.length, at: Date.now() };
 }
 
+// ---------- insider trades: SEC Form 4 filings through Quiver Quantitative (your own key, optional) ----------
+// Open-market purchases (code P) are the informative part: insiders spending their own money. Sales (S) are weaker
+// (taxes, diversification, planned sales), and grants, option exercises, tax withholding and gifts aren't decisions
+// about the stock at all, so they're shown but never counted. US listings only (Quiver covers SEC filers).
+const INS_CODE = { P: "Bought", S: "Sold", A: "Grant", M: "Option exercise", X: "Option exercise", F: "Tax withholding", G: "Gift", D: "Returned to company", C: "Conversion", J: "Other", W: "Inheritance", I: "Discretionary" };
+const quiverSym = s => /[.=^]/.test(s) ? null : s.replace(/-/g, ".");   // BRK-B on Yahoo is BRK.B at the SEC
+function insRow(r) {   // one Form 4 transaction, whatever case Quiver uses for its fields
+  const g = (...k) => { for (const x of k) if (r[x] != null && r[x] !== "") return r[x]; return null; };
+  const t = String(g("Ticker", "ticker") || "").trim().replace(/^\(|\)$/g, "").split(":").pop().trim().toUpperCase();
+  const date = Date.parse(g("Date", "date", "TransactionDate") || ""), filed = Date.parse(g("fileDate", "file_date", "FileDate", "filed") || "");
+  const code = String(g("TransactionCode", "transaction_type", "transactionCode") || "").trim().toUpperCase().slice(0, 1);
+  const shares = Math.abs(num(g("Shares", "shares")) || 0), price = num(g("PricePerShare", "price_per_share", "price")) || 0;
+  if (!t || !code || !shares) return null;
+  const yes = v => v === true || String(v).toLowerCase() === "true" || v === 1;
+  return { t, code, shares, price, v: shares * price, date: isFinite(date) ? date : null, filed: isFinite(filed) ? filed : isFinite(date) ? date : null,
+    name: String(g("Name", "name", "owner") || "").trim(), title: String(g("officerTitle", "OfficerTitle", "officer_title") || "").trim(),
+    after: num(g("SharesOwnedFollowing", "shares_owned_following")), ad: String(g("AcquiredDisposedCode", "acquired_disposed") || "").toUpperCase().slice(0, 1),
+    officer: yes(g("isOfficer", "is_officer")), director: yes(g("isDirector", "is_director")), tenPct: yes(g("isTenPercentOwner", "is_ten_percent_owner")) };
+}
+async function quiverGet(path, params = {}) {
+  const key = secretFor("quiver");
+  if (!key) throw new Error("no Quiver key");
+  const q = Object.entries(params).filter(([, v]) => v != null && v !== "").map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
+  const r = new Request("https://api.quiverquant.com" + path + (q ? "?" + q : ""));
+  r.timeoutInterval = cfg("fetchTimeout");
+  r.headers = { "Authorization": "Bearer " + key, "Accept": "application/json", "User-Agent": cfg("userAgent") };
+  const txt = await r.loadString(), code = r.response ? r.response.statusCode : 0;
+  if (code === 401 || code === 403) { settings.quiverErr = code === 403 ? "Your Quiver plan doesn't include insider trades (Trader plan)" : "Quiver didn't accept the key"; throw new Error(settings.quiverErr); }
+  if (code >= 400) throw new Error("Quiver HTTP " + code);
+  delete settings.quiverErr;
+  const j = JSON.parse(txt || "[]");
+  return Array.isArray(j) ? j : Array.isArray(j.data) ? j.data : Array.isArray(j.results) ? j.results : [];
+}
+const execTitle = t => /\b(chief|ceo|cfo|coo|cto|president|chair(man|woman)?|founder)\b/i.test(t || "");
+function insSummary(rows, sym) {   // the last insidersDays of filings, summed up
+  const since = Date.now() - cfg("insidersDays") * 864e5;
+  const recent = rows.filter(r => (r.filed || r.date || 0) >= since).sort((a, b) => (b.filed || b.date) - (a.filed || a.date));
+  const buys = recent.filter(r => r.code === "P"), sells = recent.filter(r => r.code === "S");
+  const sum = a => a.reduce((n, r) => n + r.v, 0), names = a => new Set(a.map(r => r.name || "?")).size;
+  const buyV = sum(buys), sellV = sum(sells), big = buys.slice().sort((a, b) => b.v - a.v)[0] || null;
+  const execBuy = buys.find(r => r.officer && execTitle(r.title)) || null;
+  const stake = big && big.after ? Math.min(10, big.shares / Math.max(1, big.after - big.shares)) : null;
+  let mood = "quiet";
+  if (buys.length) mood = buyV >= cfg("insidersBigBuy") || names(buys) >= 2 || execBuy ? "buying" : "some buying";
+  else if (sells.length) mood = sellV >= 5 * cfg("insidersBigBuy") && names(sells) >= 2 ? "selling" : "some selling";
+  return { at: Date.now(), days: cfg("insidersDays"), mood, buys: buys.length, buyers: names(buys), buyV, sells: sells.length, sellers: names(sells), sellV,
+    exec: execBuy ? { name: execBuy.name, title: execBuy.title } : null, tenPct: buys.some(r => r.tenPct),
+    big: big ? { name: big.name, title: big.title || (big.director ? "Director" : big.tenPct ? "10% owner" : ""), v: big.v, stake } : null,
+    lastBuy: buys.length ? buys[0].filed : null, other: recent.length - buys.length - sells.length,
+    rows: recent.slice(0, 12).map(r => ({ d: r.date, f: r.filed, n: r.name, ti: r.title || (r.director ? "Director" : r.tenPct ? "10% owner" : ""), c: r.code, sh: r.shares, p: r.price, v: r.v })) };
+}
+async function loadInsiders(sym, force) {
+  const m = market[sym], q = quiverSym(sym);
+  if (!m || !q || settings.insiders === false || !secretFor("quiver")) return;
+  if (!force && m.ins && Date.now() - m.ins.at < cfg("insidersEveryH") * 3600e3) return;
+  const rows = (await quiverGet("/beta/live/insiders", { ticker: q, page_size: 250 })).map(insRow).filter(r => r && r.t === q.toUpperCase());
+  m.ins = insSummary(rows, sym);
+}
+// What insiders across the market bought lately, for ✦ Ideas: one request, the latest filings for every ticker
+async function marketInsiderBuys() {
+  if (settings.insiders === false || !secretFor("quiver")) return [];
+  const rows = (await quiverGet("/beta/live/insiders", { page_size: 1000 })).map(insRow).filter(r => r && r.code === "P");
+  const by = {};
+  for (const r of rows) { const b = by[r.t] = by[r.t] || { s: r.t, v: 0, names: new Set(), exec: null, tenPct: false }; b.v += r.v; b.names.add(r.name); if (r.officer && execTitle(r.title)) b.exec = r.title; if (r.tenPct) b.tenPct = true; }
+  return Object.values(by).filter(b => b.v >= cfg("insidersBigBuy") || b.exec).sort((a, b) => b.v - a.v).slice(0, 15)
+    .map(b => ({ s: b.s, why: `insiders bought ${bigx(b.v)} on the open market lately (${b.names.size} buyer${b.names.size === 1 ? "" : "s"}${b.exec ? ", incl. the " + b.exec : ""}${b.tenPct ? ", incl. a 10% owner" : ""})` }));
+}
+// One line for the AI prompts, with what research says about reading it
+function insiderLine(sym) {
+  const m = market[sym] || {}, i = m.ins, st = stats(m);
+  if (!i) return "";
+  const trend = st.ma200 && m.price ? (m.price > st.ma200 ? "above" : "below") + " its 200-day average" : "";
+  if (!i.buys && !i.sells) return `Insider trades (SEC Form 4 via Quiver, last ${i.days} days by filing date): no open-market purchases or sales${i.other ? ` (${i.other} grants, option exercises or tax withholdings, which say little)` : ""}.`;
+  return `Insider trades (SEC Form 4 via Quiver, last ${i.days} days by filing date): ${i.buys ? `${i.buys} open-market purchase${i.buys === 1 ? "" : "s"} by ${i.buyers} insider${i.buyers === 1 ? "" : "s"}, ${bigx(i.buyV)}${i.exec ? `, incl. the ${i.exec.title}` : ""}${i.tenPct ? ", incl. a 10% owner" : ""}${i.big && i.big.stake ? `; largest ${bigx(i.big.v)} by ${i.big.name}${i.big.title ? " (" + i.big.title + ")" : ""}, ${i.big.stake >= 1 ? "more than doubling" : "+" + Math.round(i.big.stake * 100) + "% to"} their stake` : ""}` : "no open-market purchases"}; ${i.sells ? `${i.sells} open-market sale${i.sells === 1 ? "" : "s"} by ${i.sellers} insider${i.sellers === 1 ? "" : "s"}, ${bigx(i.sellV)}` : "no open-market sales"}${trend ? `; the price is ${trend}` : ""}. (Open-market purchases say more than sales, which are often planned or for taxes; purchases while the price is above its 200-day average have done best, purchases into a long decline less so.)`;
+}
+
 // ---------- finding and adding stocks ----------
 const QTYPES = ["EQUITY", "ETF", "MUTUALFUND", "INDEX", "CRYPTOCURRENCY"];
 async function searchSymbols(q) {
@@ -676,6 +759,7 @@ async function runRefresh(force = false) {
         await loadNews(s).catch(() => {});
         await loadCrowd(s).catch(() => {});
       }
+      await loadInsiders(s, force).catch(e => console.log("Insiders " + s + ": " + e));   // cached for insidersEveryH
       call("onProgress", ++done, syms.length);
     });
     await loadFx(force).catch(e => console.log("Exchange rates: " + e));
@@ -829,6 +913,7 @@ function stockFacts(x, nNews, tot) {
     `Price ${fx(m.price)} ${m.cur || ""}; today ${sx(dayPct(m))}; 1 month ${sx(st.p1m)}, 6 months ${sx(st.p6m)}, 1 year ${sx(st.p1y)}; 52-week range ${fx(st.lo)}–${fx(st.hi)}, now at ${st.pos52 == null ? "n/a" : st.pos52.toFixed(0) + "%"} of it; ${st.ma50 ? (m.price > st.ma50 ? "above" : "below") + " its 50-day average" : ""}${st.ma200 ? ", " + (m.price > st.ma200 ? "above" : "below") + " its 200-day average" : ""}`,
     `P/E ${fx(f.pe)}, forward P/E ${fx(f.fpe)}, market cap ${bigx(f.mcap)}, dividend yield ${f.divY ? fx(f.divY) + "%" : "none or n/a"}, beta ${fx(f.beta)}, analysts' average ${f.rating || f.rec || "n/a"}${f.target ? `, mean target ${fx(f.target)}` : ""}${f.margin != null ? `, profit margin ${fx(f.margin, 1)}%` : ""}${f.growth != null ? `, revenue growth ${sx(f.growth)}` : ""}${m.prof && m.prof.sector ? `; sector ${m.prof.sector}${m.prof.industry ? " / " + m.prof.industry : ""}` : ""}`,
     c && c.bull + c.bear >= 5 ? `Crowd mood (StockTwits, last ${c.n} posts): ${c.bull} bullish, ${c.bear} bearish` : "",
+    insiderLine(x.s),
     (m.news || []).length ? "Headlines:\n" + m.news.slice(0, nNews).map((h, i) => `[${i + 1}] ${dateS(h.at)} ${h.p}: ${h.t}`).join("\n") : "Headlines: none found",
   ].filter(Boolean).join("\n");
 }
@@ -944,6 +1029,8 @@ async function runIdeas() {
           if (q.symbol && !cand.has(q.symbol)) cand.set(q.symbol, `${q.shortName || q.symbol}: ${id.replace(/_/g, " ")}, P/E ${fx(num(q.trailingPE))}, today ${sx(num(q.regularMarketChangePercent))}`);
       } catch (e) {}
     }
+    try { for (const b of await marketInsiderBuys()) if (!cand.has(b.s)) cand.set(b.s, b.why); else cand.set(b.s, cand.get(b.s) + "; " + b.why); }
+    catch (e) { console.log("Insider buys: " + e); }
     const mine = new Set(stocks.map(x => x.s));
     const nAct = strategies.filter(g => g.status !== "retired").length;
     const sectors = [...new Set(stocks.map(x => market[x.s] && market[x.s].prof && market[x.s].prof.sector).filter(Boolean))];
@@ -980,9 +1067,11 @@ JSON in this exact shape: {"ideas":[{"symbol":"TICKER","name":"company","why":"2
     for (const it of list) market[it.s] = market[it.s] || { pts: it.year, price: it.price, prev: it.prev, cur: it.cur };
     await loadFundamentals(list.map(it => it.s)).catch(() => {});
     await pool(list, cfg("concurrency"), it => loadProfile(it.s).catch(() => {}));
+    await pool(list, 3, it => loadInsiders(it.s, true).catch(() => {}));
     for (const it of list) {
       const m = market[it.s] || {};
       it.f = m.f || {}; it.prof = m.prof ? { sector: m.prof.sector, industry: m.prof.industry, about: m.prof.about } : null;
+      if (m.ins) it.ins = m.ins;
       delete it.year;
     }
     for (const s2 of tmp) if (!stocks.some(x => x.s === s2) && !previews.has(s2)) delete market[s2];
@@ -1773,7 +1862,7 @@ async function openPreview(sym) {
   previews.add(sym); push();
   try { await loadPrices(sym); } catch (e) { market[sym] = Object.assign(market[sym] || {}, { err: String(e.message || e).slice(0, 80) }); }
   push();
-  await Promise.all([loadNews(sym).catch(() => {}), loadCrowd(sym).catch(() => {}), loadFundamentals([sym]).catch(() => {}), loadProfile(sym).catch(() => {})]);
+  await Promise.all([loadNews(sym).catch(() => {}), loadCrowd(sym).catch(() => {}), loadFundamentals([sym]).catch(() => {}), loadProfile(sym).catch(() => {}), loadInsiders(sym).catch(() => {})]);
   push();
 }
 function clientState() {
@@ -1783,7 +1872,7 @@ function clientState() {
       return {
         s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, idx: stocks.indexOf(x),
         price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
-        st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null,
+        st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null, ins: m.ins || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
         story: insights.stories[x.s] || null,
       };
@@ -1817,7 +1906,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -1930,7 +2019,7 @@ async function handle(m) {
     case "state": return push();
     case "set":
       if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen", "readerProxy",
+      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen", "readerProxy", "insiders",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -2968,7 +3057,7 @@ function clientApp() {
       cell("ma50", "50-day average", st.ma50 ? `${money(st.ma50, it.cur)} ${vsMa(st.ma50)}` : "—"), cell("ma200", "200-day average", st.ma200 ? `${money(st.ma200, it.cur)} ${vsMa(st.ma200)}` : "—"),
       cell("rsi", "RSI, 14 days", it.rsi != null ? `${nf(it.rsi, 0)} <small>${rsiWord(it.rsi)}</small>` : "—"), cell("beta", "Beta", f.beta != null ? nf(f.beta, 2) : "—"),
       cell("target", "Analyst target", f.target ? `${money(f.target, it.cur)} <small class="${cls(up)}">${pct(up, 0)}</small>` : "—"), cell("rating", "Analysts", f.rating ? esc(f.rating) : f.rec ? esc(cap(String(f.rec).replace(/_/g, " "))) : "—"),
-    ].concat(f.margin != null ? [cell("margin", "Profit margin", nf(f.margin, 1) + "%")] : []).concat(f.growth != null ? [cell("growth", "Revenue growth", pct(f.growth, 1))] : []);
+    ].concat(f.margin != null ? [cell("margin", "Profit margin", nf(f.margin, 1) + "%")] : []).concat(f.growth != null ? [cell("growth", "Revenue growth", pct(f.growth, 1))] : []).concat(it.ins ? [cell("insiders", `Insiders, ${it.ins.days} d`, `<span class="${(insWord(it.ins) || [])[1]}">${esc((insWord(it.ins) || [""])[0])}</span>`)] : []);
     const ek = ideaExplain && ideaExplain.startsWith(it.s + "|") ? ideaExplain.slice(it.s.length + 1) : null;
     return `<article class="idea" id="idea-${esc(it.s)}"><div class="idea-h"><button class="r-l idea-open" data-act="preview" data-v="${esc(it.s)}" aria-label="See everything about ${esc(it.s)}"><b class="sym">${esc(it.s)} <span class="chev" aria-hidden="true">›</span></b><small>${esc(it.name)}</small></button>
       <div class="r-r"><b>${money(it.price, it.cur)}</b><span class="pill ${c}">${pct(d)}</span></div></div>
@@ -3012,6 +3101,7 @@ function clientApp() {
     ma50: "50-day average: the average closing price over the last 50 trading days, about ten weeks. A price above it means the recent trend is up; the small number is how far the price is from it.",
     ma200: "200-day average: the average over about ten months, the classic long-term trend line. Above it, the long-term trend is up; below it, down.",
     rsi: "RSI (relative strength index, 14 days): from 0 to 100, how strongly the price has moved lately. Above 70 it has risen fast and may pause; below 30 it has fallen fast and may bounce. A hint, not a rule.",
+    insiders: "Insiders: what the company's officers, directors and biggest owners did with their own shares, from SEC Form 4 filings (via Quiver Quantitative). Purchases on the open market mean they spent their own money and carry the most information; research finds them most telling when the price is above its 200-day average. Sales say less: insiders sell for taxes, diversification or planned programs. Grants and option exercises aren't counted.",
     crowd: "Crowd mood: recent StockTwits posts tagged bullish versus bearish. Loud and fast-moving, not always right.",
   };
   function renderDetail() {
@@ -3032,7 +3122,7 @@ function clientApp() {
       <p class="note">${x.mt ? "Last trade " + when(x.mt) : x.err ? "Couldn't load: " + esc(x.err) : ""}</p>${mkBadge(x, true)}
       <div class="seg wide rng">${[["1d", "1D"], ["5d", "1W"], ["1m", "1M"], ["6m", "6M"], ["1y", "1Y"], ["5y", "5Y"]].map(([v, l]) => `<button class="${range === v ? "on" : ""}" data-act="range" data-v="${v}">${l}</button>`).join("")}</div>
       ${HIST_R.includes(range) && !hist[x.s + "|" + range] ? `<p class="muted pad chart-wait">Loading ${range === "1d" ? "today" : range === "5d" ? "the week" : "five years"}…</p>` : chartFor(x)}
-      ${holdingHTML(x)}${signalHTML(x)}${storyHTML(x)}${numbersHTML(x)}${aboutHTML(x)}${newsHTML(x)}${manageHTML(x)}
+      ${holdingHTML(x)}${signalHTML(x)}${storyHTML(x)}${numbersHTML(x)}${insidersHTML(x)}${aboutHTML(x)}${newsHTML(x)}${manageHTML(x)}
     </div>`;
     el.scrollTop = keep;   // re-renders must not jump the user back to the top
   }
@@ -3050,10 +3140,10 @@ function clientApp() {
   function signalHTML(x) {
     if (x.sig) return `<section class="sigsec"><h3 class="sec">Stockit's view</h3>
       <div class="sigbig sig-${x.sig.signal}"><span class="sb-w">${cap(x.sig.signal)}</span><span class="sb-c">${esc(x.sig.confidence)} confidence</span></div>
-      ${x.sig.line ? `<p>${esc(x.sig.line)}</p>` : ""}${!x.story && x.bstory ? `<p class="ink2">${esc(x.bstory)}</p>` : ""}
+      ${x.sig.line ? `<p>${esc(x.sig.line)}</p>` : ""}${!x.story && x.bstory ? `<p class="ink2">${esc(x.bstory)}</p>` : ""}${insiderNote(x)}
       <span class="badge-ai">✦ AI view by ${PN[x.sig.by] || esc(x.sig.by)}, ${rel(x.sig.at)}</span><p class="note">An opinion from the numbers and headlines here, not financial advice.</p></section>`;
     if (x.trend) return `<section class="sigsec"><h3 class="sec">Price trend</h3>
-      <div class="sigbig ex t-${x.trend.trend}"><span class="sb-w">${TREND[x.trend.trend]}</span></div><p>${esc(x.trend.why)}</p>
+      <div class="sigbig ex t-${x.trend.trend}"><span class="sb-w">${TREND[x.trend.trend]}</span></div><p>${esc(x.trend.why)}</p>${insiderNote(x)}
       <span class="badge-ex">From the price alone — no AI</span></section>`;
     return "";
   }
@@ -3070,6 +3160,37 @@ function clientApp() {
       <div class="aic-btns"><button class="sm" data-act="listenstory" data-v="${esc(x.s)}">${SPK}Listen to the story</button><button class="sm" data-act="share-story" data-v="${esc(x.s)}">Share</button>
         <button class="sm" data-act="story" data-v="${esc(x.s)}" ${bz ? "disabled" : ""}>${bz ? "Writing…" : "Rewrite"}</button></div></section>`;
   }
+  // ---- insider trades (SEC Form 4 via Quiver) ----
+  const INS_C = { P: "Bought", S: "Sold", A: "Grant", M: "Option exercise", X: "Option exercise", F: "Tax withholding", G: "Gift", D: "Returned", C: "Conversion" };
+  const usd = v => money(v, "USD", v >= 10000);
+  function insWord(i) {   // for a tile or a chip: [word, tone]
+    if (!i) return null;
+    if (i.mood === "buying") return ["Buying " + usd(i.buyV), "up"];
+    if (i.mood === "some buying") return ["Some buying " + usd(i.buyV), "up"];
+    if (i.mood === "selling") return ["Selling " + usd(i.sellV), "down"];
+    if (i.mood === "some selling") return ["Some selling " + usd(i.sellV), "muted"];
+    return ["Quiet", "muted"];
+  }
+  function insiderNote(x) {   // what the insider trades add to Stockit's view, with the trend it's read against
+    const i = x.ins; if (!i || (!i.buys && !i.sells)) return "";
+    const above = x.st && x.st.ma200 && x.price != null ? x.price > x.st.ma200 : null;
+    if (i.buys && (i.mood === "buying")) return `<p class="insnote up">↑ Insiders bought ${usd(i.buyV)} on the open market in ${i.days} days${i.exec ? `, including the ${esc(i.exec.title)}` : i.buyers > 1 ? `, ${i.buyers} of them` : ""}${above === true ? " — with the price above its 200-day average, the combination that has done best historically." : above === false ? " — but the price is below its 200-day average: they may be early, or buying a falling stock." : "."}</p>`;
+    if (i.buys) return `<p class="insnote">Insiders made ${i.buys} small open-market purchase${i.buys === 1 ? "" : "s"} (${usd(i.buyV)}) in ${i.days} days.</p>`;
+    return `<p class="insnote ${i.mood === "selling" ? "down" : ""}">↓ Insiders sold ${usd(i.sellV)} on the open market in ${i.days} days${i.sellers > 1 ? `, ${i.sellers} of them` : ""}. Sales say less than purchases: they're often planned, or for taxes.</p>`;
+  }
+  function insidersHTML(x) {
+    const i = x.ins;
+    if (!i) return S.secrets && S.secrets.quiver && S.secrets.quiver.last4 && /[.=^]/.test(x.s) ? "" : "";
+    const rows = (i.rows || []).slice(0, 8);
+    return `<section class="ins"><h3 class="sec">Insider trades</h3>
+      <p class="ins-sum">${i.buys || i.sells ? `${i.buys ? `<b class="up">${i.buys} purchase${i.buys === 1 ? "" : "s"}, ${usd(i.buyV)}</b>` : "No purchases"} · ${i.sells ? `<b class="down">${i.sells} sale${i.sells === 1 ? "" : "s"}, ${usd(i.sellV)}</b>` : "no sales"}` : "No open-market purchases or sales"} <small class="muted">in ${i.days} days${i.other ? `, plus ${i.other} grants, option exercises or tax withholdings` : ""}</small></p>
+      ${insiderNote(x)}
+      ${rows.length ? `<div class="ins-t">${rows.map(r => `<div class="ins-r ${r.c === "P" ? "buy" : r.c === "S" ? "sell" : "other"}"><span class="ins-d">${r.f ? new Date(r.f).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—"}</span>
+        <span class="ins-n"><b>${esc(r.n || "Insider")}</b><small>${esc(r.ti || "")}</small></span>
+        <span class="ins-c">${esc(INS_C[r.c] || r.c)}<small>${nf(r.sh, 0)} sh${r.p ? " @ " + money(r.p, "USD") : ""}</small></span>
+        <span class="ins-v">${r.v ? usd(r.v) : ""}</span></div>`).join("")}</div>` : ""}
+      <p class="note">From SEC Form 4 filings via Quiver Quantitative, by filing date. Purchases (on the open market) count most; grants, option exercises and tax withholding aren't decisions about the stock.</p></section>`;
+  }
   function numbersHTML(x) {
     const f = x.f || {}, st = x.st || {};
     const up = f.target && x.price ? (f.target / x.price - 1) * 100 : null;
@@ -3083,6 +3204,8 @@ function clientApp() {
     const rsi = rsiC(x.pts), vsMa = v => v && x.price != null ? ` <small class="${cls(x.price - v)}">${pct((x.price / v - 1) * 100, 1)}</small>` : "";
     tiles.push(["ma50", "50-day average", st.ma50 ? money(st.ma50, x.cur) + vsMa(st.ma50) : "—"], ["ma200", "200-day average", st.ma200 ? money(st.ma200, x.cur) + vsMa(st.ma200) : "—"],
       ["rsi", "RSI, 14 days", rsi != null ? `${nf(rsi, 0)} <small>${rsiWord(rsi)}</small>` : "—"]);
+    const iw = insWord(x.ins);
+    if (iw) tiles.push(["insiders", `Insiders, ${x.ins.days} days`, `<span class="${iw[1]}">${esc(iw[0])}</span>`]);
     const c = x.crowd, crowd = c && c.bull + c.bear >= 5 ? Math.round(c.bull / (c.bull + c.bear) * 100) : null;
     const ex = explainKey && EXPLAIN[explainKey] ? `<p class="explain">${esc(EXPLAIN[explainKey])}</p>` : `<p class="note">Tap a number to see what it means.</p>`;
     return `<section><h3 class="sec">Key numbers</h3>
@@ -3207,6 +3330,9 @@ function clientApp() {
       ${sw("readerProxy", "Read blocked pages through Jina Reader", "When an article won't open from your phone (Yahoo's consent page in Europe, pages built by scripts), its public address goes to r.jina.ai, which returns the text")}
       <div class="srow"><div class="grow"><b>Jina Reader key (optional)</b><small class="muted">${S.secrets.jina && S.secrets.jina.last4 ? "Saved, ending …" + esc(S.secrets.jina.last4) : "Not set"}. Free at jina.ai; only needed if Jina Reader refuses without one.</small></div>
         <button class="sm" data-act="secret-set" data-v="jina">${S.secrets.jina && S.secrets.jina.last4 ? "Change" : "Add"}</button>${S.secrets.jina && S.secrets.jina.last4 ? `<button class="sm danger ${secArmed === "jina" ? "armed" : ""}" data-act="secret-remove" data-v="jina">${secArmed === "jina" ? "Confirm" : "Remove"}</button>` : ""}</div>
+      ${sw("insiders", "Insider trades", "What insiders bought and sold (SEC Form 4), for US stocks, in Stockit's view, stories and ideas. Needs a Quiver key")}
+      <div class="srow"><div class="grow"><b>Quiver key (optional)</b><small class="muted">${S.secrets.quiver && S.secrets.quiver.last4 ? "Saved, ending …" + esc(S.secrets.quiver.last4) : "Not set"}. From api.quiverquant.com; insider trades need Quiver's Trader plan.${S.settings.quiverErr ? ` <span class="danger">${esc(S.settings.quiverErr)}</span>` : ""}</small></div>
+        <button class="sm" data-act="secret-set" data-v="quiver">${S.secrets.quiver && S.secrets.quiver.last4 ? "Change" : "Add"}</button>${S.secrets.quiver && S.secrets.quiver.last4 ? `<button class="sm danger ${secArmed === "quiver" ? "armed" : ""}" data-act="secret-remove" data-v="quiver">${secArmed === "quiver" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <div class="srow"><div class="grow"><b>Finnhub key (optional)</b><small class="muted">${fh.last4 ? "Saved, ending …" + esc(fh.last4) : "Not set"}. A backup source for company numbers when Yahoo doesn't answer.</small></div>
         <button class="sm" data-act="secret-set" data-v="finnhub">${fh.last4 ? "Change" : "Add"}</button>${fh.last4 ? `<button class="sm danger ${secArmed === "finnhub" ? "armed" : ""}" data-act="secret-remove" data-v="finnhub">${secArmed === "finnhub" ? "Confirm" : "Remove"}</button>` : ""}</div>
       <h3 class="sec">AI advice</h3>
@@ -3321,6 +3447,7 @@ function clientApp() {
         : x.list !== "own" ? `<span class="fl-k">Watching</span>` : `<span class="fl-k">Shares not set</span>`}
       ${x.sig ? sigChip(x.sig) : x.trend ? `<span class="chip t-${x.trend.trend}">${TREND[x.trend.trend]}</span>` : ""}
       ${r ? `<span class="fl-r" title="Average analyst rating">Analysts <b>${esc(r[0])}</b>${r[1] ? ` <span class="muted">${esc(r[1])}</span>` : ""}</span>` : ""}
+      ${x.ins && /buying|selling/.test(x.ins.mood) && x.ins.mood !== "some selling" ? `<span class="fl-r" title="Insider trades, SEC Form 4">Insiders <b class="${/buying/.test(x.ins.mood) ? "up" : "down"}">${esc(x.ins.mood === "buying" ? "buying" : x.ins.mood === "some buying" ? "bought a little" : "selling")}</b></span>` : ""}
       ${crowd != null ? `<span class="fl-r" title="StockTwits crowd mood">Crowd <b class="${crowd >= 50 ? "up" : "down"}">${crowd}% bullish</b></span><span class="flmood" aria-hidden="true"><i style="width:${crowd}%"></i></span>` : ""}`;
   }
   const dgOpen = new Set();
@@ -4927,6 +5054,16 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
 .arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)} .arr-b.wid.on{background:var(--up)}
 .srow.col{flex-direction:column;align-items:flex-start;gap:4px} .wchip{margin:2px 2px 0 0;font-size:calc(12px * var(--ts))}
+/* Insider trades */
+.insnote{margin:8px 0 0;padding:8px 10px;border-radius:9px;background:var(--sheet);border-left:3px solid var(--rule);font-size:calc(14px * var(--ts));line-height:1.45}
+.insnote.up{border-left-color:var(--up)} .insnote.down{border-left-color:var(--danger)}
+.ins-sum{margin:4px 0 2px}
+.ins-t{margin:10px 0 6px;border-top:1px solid var(--rule)}
+.ins-r{display:grid;grid-template-columns:44px 1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--rule);font-size:calc(13.5px * var(--ts))}
+.ins-r small{display:block;color:var(--muted);font-size:calc(11.5px * var(--ts))}
+.ins-d{color:var(--muted);font-size:calc(12px * var(--ts))} .ins-n{min-width:0} .ins-n b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.ins-c{text-align:right} .ins-v{text-align:right;font-weight:700;min-width:58px}
+.ins-r.buy .ins-c,.ins-r.buy .ins-v{color:var(--up)} .ins-r.sell .ins-c,.ins-r.sell .ins-v{color:var(--danger)} .ins-r.other{opacity:.65}
 /* My strategies */
 .idea-trend{margin:14px 0 6px;line-height:1.65}
 .idea-trend .chip{margin-right:4px;vertical-align:1px}
