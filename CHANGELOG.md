@@ -2,6 +2,13 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.21.1 (2026-11-04): Built with Widgets 1.1.0
+
+
+**Changes**
+
+- Settings › Built with shows Widgets 1.1.0: Stockit's compact widget, widget pins and hiding amounts from Shortcuts are now part of the shared widgets blueprint
+
 ## 1.21.0 (2026-11-04): Your stocks on the widget
 
 - ▦ **Pin stocks to the widget**: Choose up to 8 stocks from your portfolio or watchlist; with none chosen, your best performers today show.

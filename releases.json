@@ -4,6 +4,15 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.21.1",
+      "date": "2026-11-04",
+      "title": "Built with Widgets 1.1.0",
+      "highlights": [],
+      "changes": [
+        "Settings › Built with shows Widgets 1.1.0: Stockit's compact widget, widget pins and hiding amounts from Shortcuts are now part of the shared widgets blueprint"
+      ]
+    },
+    {
       "version": "1.21.0",
       "date": "2026-11-04",
       "title": "Your stocks on the widget",
