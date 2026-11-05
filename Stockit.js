@@ -29,7 +29,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.21.0';
+const VERSION = '1.21.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -55,7 +55,7 @@ const BLUEPRINTS = [
   { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.20.1' },
   { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
   { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
-  { id: 'widgets', name: 'Widgets', version: '1.0.0', since: '1.0.0' },
+  { id: 'widgets', name: 'Widgets', version: '1.1.0', since: '1.0.0' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
   { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.0', since: '1.19.5' },
