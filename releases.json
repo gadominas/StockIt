@@ -4,6 +4,37 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.21.0",
+      "date": "2026-11-04",
+      "title": "Your stocks on the widget",
+      "highlights": [
+        {
+          "icon": "▦",
+          "title": "Pin stocks to the widget",
+          "text": "Choose up to 8 stocks from your portfolio or watchlist; with none chosen, your best performers today show."
+        },
+        {
+          "icon": "🔢",
+          "title": "8 tickers at once",
+          "text": "The medium widget fits 8 tickers in two columns; small 4, large 8 with price and view."
+        },
+        {
+          "icon": "🙈",
+          "title": "Hide amounts with Back Tap",
+          "text": "A double tap on the back of your iPhone hides amounts in Stockit and on the widget; a triple tap shows them."
+        }
+      ],
+      "changes": [
+        "▦ on each row in Arrange, and Show on the widget on a stock's page, pin a stock to the widget; pinned stocks show in your own order, the first 8",
+        "With nothing pinned, the widget shows your best performers today from your portfolio, or from your watchlist when you own nothing",
+        "Settings › Portfolio › Stocks on the widget lists the pinned stocks (tap one to take it off) and explains the hide and show shortcuts",
+        "New compact widget: medium has a one-line summary and 8 tickers in two columns; small has today's move and 4 tickers; large has today's move, the ✦ headline and 8 stocks with price and ✦ view; exchange endings like .DE are left off the ticker",
+        "Stockit takes hide, show or privacy toggle from Shortcuts' Run Script (and ?privacy=on or off in its link) without opening: privacy mode switches, the widget follows at its next refresh",
+        "A widget whose parameter is private never shows amounts",
+        "iPhone apps can't use the volume buttons, so Back Tap (or the Action Button) runs these shortcuts instead"
+      ]
+    },
+    {
       "version": "1.20.3",
       "date": "2026-11-04",
       "title": "A slight pull is enough",

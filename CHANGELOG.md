@@ -2,6 +2,22 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.21.0 (2026-11-04): Your stocks on the widget
+
+- ▦ **Pin stocks to the widget**: Choose up to 8 stocks from your portfolio or watchlist; with none chosen, your best performers today show.
+- 🔢 **8 tickers at once**: The medium widget fits 8 tickers in two columns; small 4, large 8 with price and view.
+- 🙈 **Hide amounts with Back Tap**: A double tap on the back of your iPhone hides amounts in Stockit and on the widget; a triple tap shows them.
+
+**Changes**
+
+- ▦ on each row in Arrange, and Show on the widget on a stock's page, pin a stock to the widget; pinned stocks show in your own order, the first 8
+- With nothing pinned, the widget shows your best performers today from your portfolio, or from your watchlist when you own nothing
+- Settings › Portfolio › Stocks on the widget lists the pinned stocks (tap one to take it off) and explains the hide and show shortcuts
+- New compact widget: medium has a one-line summary and 8 tickers in two columns; small has today's move and 4 tickers; large has today's move, the ✦ headline and 8 stocks with price and ✦ view; exchange endings like .DE are left off the ticker
+- Stockit takes hide, show or privacy toggle from Shortcuts' Run Script (and ?privacy=on or off in its link) without opening: privacy mode switches, the widget follows at its next refresh
+- A widget whose parameter is private never shows amounts
+- iPhone apps can't use the volume buttons, so Back Tap (or the Action Button) runs these shortcuts instead
+
 ## 1.20.3 (2026-11-04): A slight pull is enough
 
 - 👇 **Shorter pull to close**: A slight pull or a short flick down now closes a stock's page.
