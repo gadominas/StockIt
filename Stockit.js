@@ -31,7 +31,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.25.0';
+const VERSION = '1.26.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -276,7 +276,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, insiders: true, widgetTrend: "1m",   // widgetTrend: the longer change beside each widget ticker (1w, 2w, 1m, 3m, off) checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, insiders: true, glanceOpen: true, widgetTrend: "1m",   // widgetTrend: the longer change beside each widget ticker (1w, 2w, 1m, 3m, off) checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1917,7 +1917,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, widgetTrend: settings.widgetTrend || "1m", quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, glanceOpen: settings.glanceOpen !== false, widgetTrend: settings.widgetTrend || "1m", quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -2102,7 +2102,7 @@ async function handle(m) {
     case "state": return push();
     case "set":
       if (m.k === "shareUsage") { setUsage(m.v === true || m.v === "true" || m.v === "1"); return push(); }
-      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen", "readerProxy", "insiders",
+      if (["openInReader", "tab", "sort", "range", "addTo", "refreshOnOpen", "widgetMoney", "newsYahoo", "newsWeb", "crowd", "style", "ai", "theme", "density", "font", "textSize", "checkUpdates", "aiStrat", "privacy", "briefSeen", "readerProxy", "insiders", "glanceOpen",
         "speechEngine", "voiceURI", "voiceRate", "voicePitch", "voiceGender", "ttsModel", "ttsVoice", "ttsInstructions"].includes(m.k)) settings[m.k] = m.v;
       if (m.k === "ideasFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v)) settings.ideasFold = { strat: !!m.v.strat, themes: !!m.v.themes, ideas: !!m.v.ideas };
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
@@ -2825,7 +2825,7 @@ function clientApp() {
       <h2>Start with the stocks you own or follow</h2><p>Search by name or ticker, paste a list, import your broker's CSV${S.settings.hasKey ? ", or snap a screenshot of your Stocks app watchlist" : ""}.</p>
       <button class="primary" data-act="addopen">Add stocks</button></section>`;
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
-    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + briefHTML() : "";
+    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + glanceHTML(items) + briefHTML() : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = [["mine", "Mine"]].concat(tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
@@ -2866,6 +2866,25 @@ function clientApp() {
       : `<small class="r-day muted">Today: not traded yet${q.opensAt ? ", opens in " + dur(q.opensAt - Date.now()) : ""}</small>`;
     const before = q.prevM != null ? `<small class="r-prev">Previous session ${P(sgn(q.prevM, q.mcur))} (${pct(q.prevPct)})</small>` : "";
     return now + before;
+  }
+  // At a glance: every stock you own as a small tile (ticker, value, gain since you bought), four to a row,
+  // biggest first, folding away under one line. Tap a tile for the stock.
+  function glanceHTML(items) {
+    const own = items.filter(x => x.list === "own" && x.sh > 0 && x.price != null);
+    if (own.length < 2) return "";
+    const open = S.settings.glanceOpen !== false;
+    const val = x => posHome(x) != null ? posHome(x) : x.sh * x.price;
+    const tiles = own.slice().sort((a, b) => (!!b.pin - !!a.pin) || val(b) - val(a)).map(x => {
+      const v = posHome(x), cur = v != null ? HOME() : x.cur, inv = x.cost ? (v != null ? inHome(x.sh * x.cost, x.cur) : x.sh * x.cost) : null;
+      const g = inv != null ? (v != null ? v : x.sh * x.price) - inv : null, gp = g != null && inv ? g / inv * 100 : null;
+      const short = n => Math.abs(n) >= 1000 ? money(n, cur, true) : money(n, cur, false, 0);
+      const sg = n => (n >= 0 ? "+" : "−") + short(Math.abs(n));
+      return `<button class="gl-t ${x.hl ? "hl" : ""}" data-act="open" data-v="${esc(x.s)}" aria-label="${esc(x.s)}">
+        <b>${esc(x.s.replace(/\.(DE|F|L|PA|AS|MI|TO|V|SW|ST|OL|CO|HE|VI|BR|MC|LS|T|HK|AX)$/, ""))}</b>
+        <span class="gl-1"><span class="gl-v">${P(short(val(x)))}</span><span class="gl-g ${cls(g != null ? g : dayPct(x))}">${g == null ? pct(dayPct(x), 1) : priv() ? pct(gp, 1) : sg(g)}</span></span></button>`;
+    }).join("");
+    return `<section class="glance ${open ? "open" : ""}"><button class="gl-h" data-act="glance" aria-expanded="${open}"><span>At a glance</span><small>${own.length} stocks · value, gain since bought</small><span class="chev" aria-hidden="true">›</span></button>
+      ${open ? `<div class="gl-grid">${tiles}</div>` : ""}</section>`;
   }
   function investedLine(x) {
     if (x.list !== "own" || !x.sh || !x.cost || x.price == null) return "";
@@ -4388,6 +4407,7 @@ function clientApp() {
       case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "lot": send("lot", { s: v, id: t.dataset.id || "" }); break;
+      case "glance": S.settings.glanceOpen = S.settings.glanceOpen === false; send("set", { k: "glanceOpen", v: S.settings.glanceOpen }); render(); break;
       case "wtrend": S.settings.widgetTrend = v; send("set", { k: "widgetTrend", v }); renderCfg(); break;
       case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
       case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : k === "wpin" ? (y[k] ? `${v} is on the widget` : `${v} left the widget`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
@@ -5182,6 +5202,21 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
 .arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)} .arr-b.wid.on{background:var(--up)}
 .srow.col{flex-direction:column;align-items:flex-start;gap:4px} .wchip{margin:2px 2px 0 0;font-size:calc(12px * var(--ts))}
+/* At a glance: every stock you own, four to a row */
+.glance{margin:4px 0 12px;border:1px solid var(--rule);border-radius:12px;background:var(--sheet);overflow:hidden}
+.gl-h{display:flex;align-items:baseline;gap:8px;width:100%;padding:9px 12px;text-align:left}
+.gl-h span:first-child{font-weight:700;font-size:calc(14px * var(--ts))}
+.gl-h small{flex:1;color:var(--muted);font-size:calc(12px * var(--ts));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gl-h .chev{color:var(--muted);font-size:18px;transition:transform .2s} .glance.open .gl-h .chev{transform:rotate(90deg)}
+.gl-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--rule);border-top:1px solid var(--rule)}
+.gl-t{display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:6px 6px 7px 8px;background:var(--sheet);min-width:0;text-align:left}
+.gl-1{display:flex;justify-content:space-between;align-items:baseline;gap:3px;width:100%;min-width:0}
+.gl-t b{font-size:calc(12.5px * var(--ts));font-weight:800;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.gl-v{font-size:calc(11.5px * var(--ts));color:var(--muted);flex:none;font-variant-numeric:tabular-nums;white-space:nowrap}
+.gl-g{font-size:calc(11.5px * var(--ts));font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.gl-g.up{color:var(--up)} .gl-g.down{color:var(--danger)}
+.gl-t.hl{box-shadow:inset 3px 0 0 var(--amber)}
+.gl-t:active{background:var(--paper)}
 /* Positions on several markets */
 .lot-add{margin:8px 0 0}
 .lots{margin-top:12px;border-top:1px solid var(--rule);padding-top:8px}

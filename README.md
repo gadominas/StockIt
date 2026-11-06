@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.25.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.26.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -109,6 +109,7 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | | |
 |---|---|
 | 💼 **Portfolio and watchlist** | Two tabs: stocks you own, with shares and average price, and stocks you watch. Each row shows the price, today's change, a one-month trend line and Stockit's view; owned stocks also show what they made or lost this session (and, dimmed, in the session before) and what you invested and have gained or lost, in your currency. Sort by value, today's move, signal or A–Z. |
+| 👀 **At a glance** | Under your portfolio's total, every stock you own as a small tile, four to a row: ticker, value and what you've gained or lost since you bought. Folds away with one tap. |
 | 💰 **Your money at a glance** | Portfolio value, today's change and the gain since you bought, with the split across your biggest holdings, all in **one currency you choose** (euros, dollars, pounds and more), whichever markets your stocks trade on. |
 | 📊 **A page per stock** | 1D, 1W, 1M, 6M, 1Y and 5Y chart you can touch to see the price at any moment, whether its market is open, your position (value, today, since you bought), the price trend from the 50- and 200-day averages, and an About section. |
 | 🔢 **Numbers, explained** | P/E, forward P/E, market cap, dividend yield, EPS, beta, analyst target, margins, growth, 50- and 200-day averages, RSI, 52-week range and 1, 6 and 12-month performance. Tap any of them for a plain-words explanation. |
