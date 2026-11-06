@@ -32,7 +32,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.27.0';
+const VERSION = '1.27.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -2939,7 +2939,7 @@ function clientApp() {
       <h2>Start with the stocks you own or follow</h2><p>Search by name or ticker, paste a list, import your broker's CSV${S.settings.hasKey ? ", or snap a screenshot of your Stocks app watchlist" : ""}.</p>
       <button class="primary" data-act="addopen">Add stocks</button></section>`;
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
-    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + glanceHTML(items) + briefHTML() + assessCardHTML(items) : "";
+    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + glanceHTML(items) + briefHTML() : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = [["mine", "Mine"]].concat(tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
@@ -2988,6 +2988,13 @@ function clientApp() {
   const MOOD_W = { "risk-on": ["Risk-on", "ok"], mixed: ["Mixed", "warn"], "risk-off": ["Risk-off", "bad"] };
   const RATE_W = { strong: ["Strong", "ok"], fair: ["Fair", "warn"], weak: ["Weak", "bad"] };
   const VERD_W = { add: ["Add", "ok"], wait: ["Wait", "warn"], drop: ["Drop", "gone"] };
+  // Top right of the portfolio summary, beside the broker check: ✦ with the last score
+  function assessIcon() {
+    if (!S.settings.hasKey || !S.stocks.some(x => x.list === "own" && x.sh > 0)) return "";
+    const A = S.assessment, bz = isBusy("assess");
+    return `<button class="as-icon s${A ? Math.min(4, Math.floor(A.score / 25)) : 2} ${bz ? "busy" : ""}" data-act="assessopen" aria-label="Portfolio assessment${A ? ", " + A.score + " out of 100" : ""}" title="Portfolio assessment">${A && !bz ? `<b>${A.score}</b>` : "✦"}</button>`;
+  }
+  const sumIcons = () => `<div class="sum-icons">${assessIcon()}${checkIcon()}</div>`;
   function assessCardHTML(items) {
     if (!S.settings.hasKey || !items.some(x => x.list === "own" && x.sh > 0)) return "";
     const A = S.assessment, bz = isBusy("assess");
@@ -3197,14 +3204,14 @@ function clientApp() {
       const ds = items.map(dayPct).filter(v => v != null);
       if (!ds.length) return "";
       const avg = ds.reduce((a, b) => a + b, 0) / ds.length;
-      return `<section class="sum">${checkIcon()}<span class="sum-k">Your stocks today, on average</span><div class="sum-v ${cls(avg)}">${pct(avg)}</div>
+      return `<section class="sum">${sumIcons()}<span class="sum-k">Your stocks today, on average</span><div class="sum-v ${cls(avg)}">${pct(avg)}</div>
         <p class="note">Add how many shares you own (open a stock › Edit shares) to see your portfolio's value.</p></section>`;
     }
     const t = T[0], dp = t.value - t.day ? t.day / (t.value - t.day) * 100 : null;
     const vals = items.map(x => [x.s, t.cur === HOME() ? posHome(x) : null]).filter(v => v[1] != null).sort((a, b) => b[1] - a[1]);
     const shown = vals.slice(0, 6), rest = vals.slice(6).reduce((a, b) => a + b[1], 0);
     if (rest > 0) shown.push(["Other", rest]);
-    return `<section class="sum">${checkIcon()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${P(money(t.value, t.cur))}</div>
+    return `<section class="sum">${sumIcons()}<span class="sum-k">Portfolio value${t.mixed ? ` in ${esc(t.cur)}` : ""}</span><div class="sum-v">${P(money(t.value, t.cur))}</div>
       ${sumSessions(items, t, dp)}
       ${t.costKnown && t.cost ? `<div class="sum-g">${P(signed(t.value - t.cost, t.cur))} (${pct((t.value / t.cost - 1) * 100)}) since you bought</div>` : ""}
       ${T.length > 1 ? `<p class="note">Plus ${T.slice(1).map(z => P(money(z.value, z.cur))).join(" and ")} until their exchange rates load</p>` : ""}
@@ -5259,7 +5266,14 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .rng button{padding-left:4px;padding-right:4px}
 /* Check my portfolio */
 .sum{position:relative}
-.ck-icon{position:absolute;top:10px;right:2px;width:38px;height:38px;border-radius:19px;display:grid;place-items:center;background:var(--signal-wash);color:var(--signal)}
+.sum-icons{position:absolute;top:10px;right:2px;display:flex;gap:8px}
+.ck-icon{width:38px;height:38px;border-radius:19px;display:grid;place-items:center;background:var(--signal-wash);color:var(--signal)}
+.as-icon{width:38px;height:38px;border-radius:19px;display:grid;place-items:center;font-size:15px;font-weight:800;color:var(--signal);background:var(--signal-wash);border:2.5px solid var(--signal)}
+.as-icon b{font-size:14px;font-weight:800;font-variant-numeric:tabular-nums}
+.as-icon.s0,.as-icon.s1{color:var(--danger);border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent)}
+.as-icon.s2{color:var(--amber);border-color:var(--amber);background:color-mix(in srgb, var(--amber) 12%, transparent)}
+.as-icon.s3,.as-icon.s4{color:var(--up);border-color:var(--up);background:color-mix(in srgb, var(--up) 10%, transparent)}
+.as-icon.busy{animation:aspulse 1.2s ease-in-out infinite} @keyframes aspulse{50%{opacity:.45}}
 .ck-icon svg{width:21px;height:21px}
 .ck-icon.ping{animation:ckping 1.4s ease-out 1}
 @keyframes ckping{0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--signal) 55%, transparent);transform:scale(1.25)}100%{box-shadow:0 0 0 16px transparent;transform:scale(1)}}
