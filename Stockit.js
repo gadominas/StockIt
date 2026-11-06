@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - ✦ Portfolio assessment: your positions, plans and watchlist against market sentiment and world events, with next steps
  *  - Positions: the same company held on several markets or in several currencies, under one stock
  *  - Insider trades (SEC Form 4) through Quiver Quantitative with your own key: what insiders bought and sold, in signals, stories and ideas
  *  - Privacy mode: one tap on the eye hides your amounts (value, gains, shares, average prices) for demos
@@ -31,7 +32,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.26.0';
+const VERSION = '1.27.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1785,6 +1786,111 @@ JSON in this exact shape: {"strategies":[{"text":"1 or 2 sentences, first person
   finally { stratBusy = false; call("onBusy", "strat", false); }
 }
 
+// ---------- ✦ Portfolio assessment: everything Stockit knows about your money, against the market and the world ----------
+// Your positions (weights, sectors, currencies, gains, valuation, trends, signals, insiders, the crowd), your style,
+// strategies, themes, ideas and watchlist; the market's mood from indices, the VIX, rates, oil, gold and the euro;
+// and the week's headlines on markets, geopolitics, central banks and energy. One AI call; kept until you run it again.
+let assessBusy = false;
+const GAUGES = [["^GSPC", "S&P 500"], ["^IXIC", "Nasdaq"], ["^STOXX50E", "Euro Stoxx 50"], ["^GDAXI", "DAX"], ["^VIX", "VIX, the fear gauge"],
+  ["^TNX", "US 10-year yield"], ["CL=F", "Oil (WTI)"], ["GC=F", "Gold"], ["EURUSD=X", "Euro in dollars"]];
+async function marketContext() {
+  const gauges = [];
+  await pool(GAUGES, 4, async ([s, n]) => {
+    try {
+      const { meta, pts } = await yChart(s, "3mo", "1d"), q = priceFrom(meta, pts), st = stats({ pts, price: q.price });
+      gauges.push({ s, n, price: q.price, d1: q.prev ? (q.price / q.prev - 1) * 100 : null, m1: st.p1m, m3: pts.length > 2 ? (q.price / pts[0][1] - 1) * 100 : null });
+    } catch (e) { console.log("Gauge " + s + ": " + e); }
+  });
+  gauges.sort((a, b) => GAUGES.findIndex(g => g[0] === a.s) - GAUGES.findIndex(g => g[0] === b.s));
+  const heads = [], seen = new Set();
+  await pool(["stock market outlook when:7d", "geopolitics markets when:7d", "central bank interest rates inflation when:7d", "oil energy prices markets when:7d"], 2, async q => {
+    try { heads.push(...parseRSS(await getText(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`)).slice(0, 7)); } catch (e) {}
+  });
+  return { gauges, heads: heads.sort((a, b) => b.at - a.at).filter(n => { const k = normTitle(n.t); if (!k || seen.has(k)) return false; seen.add(k); return true; }).slice(0, 22) };
+}
+function assessFacts() {
+  const home = homeCur(), tot = totals()[0], own = stocks.filter(x => x.list === "own" && x.sh > 0), val = {}, bySector = {}, byCur = {};
+  for (const x of own) { const m = market[x.s] || {}, r = fxRate(m.cur); val[x.s] = m.price != null && r != null ? x.sh * m.price * r : 0; }
+  const sum = Object.values(val).reduce((a, b) => a + b, 0) || 1;
+  const row = (x, mine) => {
+    const m = market[x.s] || {}, f = m.f || {}, st = stats(m), tr = trendOf(m), sg = sigFor(x.s), i = m.ins, c = m.crowd;
+    const sector = (m.prof && m.prof.sector) || "", cur = normCur(m.cur || "USD")[0];
+    if (mine) { bySector[sector || "Unknown"] = (bySector[sector || "Unknown"] || 0) + val[x.s] / sum * 100; byCur[cur] = (byCur[cur] || 0) + val[x.s] / sum * 100; }
+    const up = f.target && m.price ? (f.target / m.price - 1) * 100 : null, g = mine && x.cost && m.price ? (m.price / x.cost - 1) * 100 : null;
+    return [`${x.s} (${m.name || x.name || x.s}${sector ? ", " + sector : ""}, ${cur}${m.exch ? ", " + m.exch : ""})`,
+      mine ? `${sx(val[x.s] / sum * 100).replace("+", "")} of the portfolio, ${fx(val[x.s])} ${home}` : "",
+      g != null ? `${sx(g)} since bought` : "", st.p1m != null ? `1M ${sx(st.p1m)}` : "", st.p6m != null ? `6M ${sx(st.p6m)}` : "", st.p1y != null ? `1Y ${sx(st.p1y)}` : "",
+      f.pe != null ? `P/E ${fx(f.pe)}` : "", f.fpe != null ? `fwd P/E ${fx(f.fpe)}` : "", f.divY ? `yield ${fx(f.divY)}%` : "", f.beta != null ? `beta ${fx(f.beta)}` : "",
+      up != null ? `analyst target ${sx(up)}` : "", tr ? `trend ${tr.trend}` : "", sg ? `view ${sg.signal}` : "",
+      i && i.mood !== "quiet" ? `insiders ${i.mood}` : "", c && c.bull + c.bear >= 5 ? `crowd ${Math.round(c.bull / (c.bull + c.bear) * 100)}% bullish` : ""].filter(Boolean).join(", ");
+  };
+  const ownLines = own.slice().sort((a, b) => val[b.s] - val[a.s]).map(x => "- " + row(x, true));
+  const watch = stocks.filter(x => x.list !== "own").map(x => "- " + row(x, false));
+  const pctList = o => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round(v)}%`).join(", ");
+  const act = strategies.filter(g => g.status !== "retired");
+  const ideas = insights.ideas && insights.ideas.list ? insights.ideas.list.slice(0, 6).map(it => `${it.s} (${it.signal}): ${it.why}`).join("; ") : "";
+  return { home, tot, ownLines, watch, sectors: pctList(bySector), currencies: pctList(byCur), act, ideas };
+}
+async function runAssessment() {
+  if (assessBusy) return;
+  if (!aiKey()) return toast("Add a Claude or OpenAI key in Settings › AI settings");
+  if (!stocks.some(x => x.list === "own" && x.sh > 0)) return toast("Add the stocks you own first");
+  assessBusy = true; call("onBusy", "assess", true);
+  const prog = (p, t) => call("onAssessProgress", p, t);
+  try {
+    prog(0.08, "Reading the market's mood…");
+    const mk = await marketContext();
+    prog(0.3, "Looking up sectors…");
+    await pool(stocks.filter(x => market[x.s] && !(market[x.s].prof && market[x.s].prof.sector)), cfg("concurrency"), x => loadProfile(x.s).catch(() => {}));
+    prog(0.4, "Putting your portfolio together…");
+    const F = assessFacts(), t = F.tot;
+    const user = `Today is ${dateS(Date.now())}. The investor counts in ${F.home}. Investing style: ${STYLE[settings.style] || STYLE.balanced}.
+Portfolio: ${t ? `${fx(t.value)} ${t.cur}, ${sx(t.value - t.day ? t.day / (t.value - t.day) * 100 : 0)} today${t.costKnown && t.cost ? `, ${sx((t.value / t.cost - 1) * 100)} since bought` : ""}` : "value unknown"}.
+Positions, largest first:
+${F.ownLines.join("\n")}
+By sector: ${F.sectors}. By currency: ${F.currencies}.
+Watchlist:
+${F.watch.join("\n") || "- nothing"}
+${planLine()}
+Themes they like: ${cfg("ideaThemes").filter(Boolean).join("; ") || "none"}.
+${F.ideas ? "Stockit's latest ideas for them: " + F.ideas : ""}
+
+Market gauges (level; today; 1 month; 3 months):
+${mk.gauges.map(g => `- ${g.n}: ${fx(g.price)}; ${g.d1 != null ? sx(g.d1) : "?"}; ${g.m1 != null ? sx(g.m1) : "?"}; ${g.m3 != null ? sx(g.m3) : "?"}`).join("\n") || "- not available"}
+This week's headlines on markets, geopolitics, central banks and energy:
+${mk.heads.map(n => `- ${n.t} (${n.p}, ${dateS(n.at)})`).join("\n") || "- not available"}
+
+Write a portfolio assessment for this investor, using only the facts above; where something isn't known, say so.
+Judge: diversification and concentration (single positions, sectors, countries, currencies), risk (beta, volatility, drawdowns, trends), quality and valuation, income, how well the portfolio fits their style, strategies and themes, and what the market's mood and world events mean for these holdings in particular.
+Give concrete next steps (3 to 6), most important first, each tied to their own stocks, watchlist, strategies or ideas, with the numbers that justify it. Prefer gradual moves (trim, add in steps, set a rule) over all-or-nothing. Also say for each watchlist stock whether to add it, wait or drop it.
+JSON in this exact shape:
+{"score": 0-100 (portfolio health for this investor), "headline": "one line", "summary": "2 or 3 sentences",
+ "market": {"mood": "risk-on" | "mixed" | "risk-off", "text": "1 or 2 sentences on market sentiment, from the gauges"},
+ "areas": [{"name": "Diversification" | "Risk" | "Quality and valuation" | "Income" | "Currencies" | "Fit with your plans", "rating": "strong" | "fair" | "weak", "text": "1 or 2 sentences with numbers"}],
+ "world": [{"theme": "a current geopolitical or macro trend from the headlines", "effect": "what it means for these holdings, naming tickers"}],
+ "risks": ["short"], "upside": ["short: potential gains"],
+ "watchlist": [{"s": "TICKER", "verdict": "add" | "wait" | "drop", "why": "1 sentence"}],
+ "actions": [{"title": "short, imperative", "why": "1 sentence with numbers", "tickers": ["TICKER"], "when": "now" | "this month" | "this quarter"}]}`;
+    prog(0.5, `✦ ${settings.aiProvider === "openai" ? "OpenAI" : "Claude"} is assessing ${F.ownLines.length} positions…`);
+    const o = parseJSON(await aiCall(TONE, user, 3000, "assessment"));
+    const clip = (v, n) => String(v || "").slice(0, n);
+    insights.assessment = {
+      at: Date.now(), by: settings.aiProvider, model: modelFor(settings.aiProvider), cur: F.home,
+      score: Math.max(0, Math.min(100, Math.round(+o.score || 0))), headline: clip(o.headline, 160), summary: clip(o.summary, 700),
+      market: o.market ? { mood: ["risk-on", "mixed", "risk-off"].includes(o.market.mood) ? o.market.mood : "mixed", text: clip(o.market.text, 400) } : null,
+      areas: (o.areas || []).slice(0, 6).map(a => ({ name: clip(a.name, 40), rating: ["strong", "fair", "weak"].includes(a.rating) ? a.rating : "fair", text: clip(a.text, 400) })),
+      world: (o.world || []).slice(0, 4).map(w => ({ theme: clip(w.theme, 120), effect: clip(w.effect, 400) })),
+      risks: (o.risks || []).slice(0, 5).map(r => clip(r, 240)), upside: (o.upside || []).slice(0, 4).map(r => clip(r, 240)),
+      watchlist: (o.watchlist || []).filter(w => w && w.s).slice(0, 12).map(w => ({ s: clip(w.s, 12).toUpperCase(), verdict: ["add", "wait", "drop"].includes(w.verdict) ? w.verdict : "wait", why: clip(w.why, 300) })),
+      actions: (o.actions || []).slice(0, 6).map(a => ({ title: clip(a.title, 140), why: clip(a.why, 400), tickers: (a.tickers || []).map(t => clip(t, 12).toUpperCase()).slice(0, 5), when: ["now", "this month", "this quarter"].includes(a.when) ? a.when : "this month" })),
+      gauges: mk.gauges, heads: mk.heads.length };
+    write("insights", insights);
+    prog(1, "Done");
+    push();
+  } catch (e) { startLog("Assessment failed: " + (e.stack || e)); toast("Assessment not written: " + String(e.message || e).slice(0, 90)); }
+  finally { assessBusy = false; call("onBusy", "assess", false); }
+}
+
 // ---------- in-app updates (app-blueprints · in-app-updates) ----------
 // Compares "1.10.0" and "1.9.2" as numbers: returns 1, 0 or -1.
 function cmpVer(a, b) {
@@ -1898,8 +2004,9 @@ function clientState() {
     fx: (() => { const home = homeCur(), rates = {};
       for (const [k, r] of Object.entries(fxRates)) if (k.endsWith(home) && k.length === home.length + 3) rates[k.slice(0, 3)] = { rate: r.rate, prev: r.prev, at: r.at };
       return { home, choice: settings.homeCur || "auto", rates, curs: HOME_CURS }; })(),
-    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy, strat: stratBusy },
+    busy: { briefing: briefingBusy, ideas: ideasBusy, stories: [...storyBusy], check: checkBusy, strat: stratBusy, assess: assessBusy },
     stratSuggest: insights.stratSuggest || null,
+    assessment: insights.assessment || null,
     check, checkShots: checkShots.map(x => x.thumb),
     ai: {
       provider: settings.aiProvider,
@@ -2295,6 +2402,13 @@ async function handle(m) {
     }
     case "stratdismiss": { const ss = insights.stratSuggest; if (ss) { ss.list = ss.list.filter(x => x.id !== m.v); write("insights", insights); } return push(); }
     case "stratsuggest": return runStratSuggest(true);
+    case "assess": return runAssessment();
+    case "assesskeep": {   // a next step from the assessment becomes one of your strategies
+      const a = insights.assessment && insights.assessment.actions[+m.v];
+      if (!a || a.kept) return;
+      strategies.unshift({ id: "g" + Date.now().toString(36), text: a.title + (a.why ? ". " + a.why : ""), when: a.when, status: "active", at: Date.now(), from: "assessment" });
+      a.kept = true; write("strategies", strategies); write("insights", insights); toast("Added to your strategies"); return push();
+    }
     case "stratdue": return runStratSuggest(false);
     case "stratdelete": strategies = strategies.filter(x => x.id !== m.v); write("strategies", strategies); return push();
     case "startlog": {
@@ -2370,9 +2484,9 @@ function clientApp() {
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const PN = { anthropic: "Claude", openai: "OpenAI" };
-  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", chat: "Article questions", check: "Portfolio checks", strategies: "Strategy suggestions", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
+  const FEAT = { briefing: "Portfolio briefing", story: "Stock stories", ideas: "Ideas", tldr: "Article TL;DRs", chat: "Article questions", check: "Portfolio checks", strategies: "Strategy suggestions", assessment: "Portfolio assessments", digest: "News stories to listen to", speech: "Read aloud", import: "Screenshot import", test: "Connection tests", other: "Other" };
   const STYLE_L = { cautious: "cautious", balanced: "balanced", adventurous: "adventurous" };
-  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); if (S.busy.strat) busyK.add("strat"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
+  const syncBusy = () => { busyK.clear(); if (S.busy.briefing) busyK.add("briefing"); if (S.busy.ideas) busyK.add("ideas"); if (S.busy.check) busyK.add("check"); if (S.busy.strat) busyK.add("strat"); if (S.busy.assess) busyK.add("assess"); (S.busy.stories || []).forEach(s => busyK.add("story:" + s)); };
   syncBusy();
 
   // ---- appearance (app-blueprints · settings, Step 3) ----
@@ -2802,7 +2916,7 @@ function clientApp() {
     const t = [["own", "Portfolio", own], ["watch", "Watchlist", watch], ["flash", "Flash", null], ["markets", "Markets", null], ["ideas", S.settings.hasKey ? "✦ Ideas" : "Ideas", null]];
     $("#tabs").innerHTML = t.map(([k, l, n]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${l}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`).join("");
   }
-  function renderAll() { renderPriv(); render(); renderDetail(); renderNews(); renderCheck(); renderAdd(); renderAI(); renderCfg(); }
+  function renderAll() { renderPriv(); render(); renderAssess(); renderDetail(); renderNews(); renderCheck(); renderAdd(); renderAI(); renderCfg(); }
   function render() {
     applyLook(); renderPriv(); renderStatus(); renderTabs();
     $("#main").innerHTML = tab === "ideas" ? ideasHTML() : tab === "flash" ? flashHTML() : tab === "markets" ? marketsHTML() : listHTML();
@@ -2825,7 +2939,7 @@ function clientApp() {
       <h2>Start with the stocks you own or follow</h2><p>Search by name or ticker, paste a list, import your broker's CSV${S.settings.hasKey ? ", or snap a screenshot of your Stocks app watchlist" : ""}.</p>
       <button class="primary" data-act="addopen">Add stocks</button></section>`;
     const items = S.stocks.filter(x => tab === "own" ? x.list === "own" : x.list !== "own");
-    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + glanceHTML(items) + briefHTML() : "";
+    const head = tab === "own" ? checkIntroHTML(items) + summaryHTML(items) + glanceHTML(items) + briefHTML() + assessCardHTML(items) : "";
     if (!items.length) return head + `<section class="empty small"><p>${tab === "own" ? "No owned stocks yet. Open one from your watchlist and tap <b>I own this</b>, or add one with +." : "Nothing on your watchlist. Add stocks you're curious about with +."}</p></section>`;
     const sorts = [["mine", "Mine"]].concat(tab === "own" ? [["value", "Value"]] : []).concat([["today", "Today"], ["signal", "Signal"], ["az", "A–Z"]]);
     const cur = tab === "watch" && sort === "value" ? "today" : sort;
@@ -2869,6 +2983,50 @@ function clientApp() {
   }
   // At a glance: every stock you own as a small tile (ticker, value, gain since you bought), four to a row,
   // biggest first, folding away under one line. Tap a tile for the stock.
+  // ---- ✦ Portfolio assessment ----
+  let assessOpen = false, assessProg = null;
+  const MOOD_W = { "risk-on": ["Risk-on", "ok"], mixed: ["Mixed", "warn"], "risk-off": ["Risk-off", "bad"] };
+  const RATE_W = { strong: ["Strong", "ok"], fair: ["Fair", "warn"], weak: ["Weak", "bad"] };
+  const VERD_W = { add: ["Add", "ok"], wait: ["Wait", "warn"], drop: ["Drop", "gone"] };
+  function assessCardHTML(items) {
+    if (!S.settings.hasKey || !items.some(x => x.list === "own" && x.sh > 0)) return "";
+    const A = S.assessment, bz = isBusy("assess");
+    return `<button class="as-card" data-act="assessopen"><span class="as-ring s${A ? Math.min(4, Math.floor(A.score / 25)) : 2}">${A ? A.score : "✦"}</span>
+      <span class="as-t"><b>✦ Portfolio assessment</b><small>${bz ? "Assessing…" : A ? `${esc(mask(A.headline))} · ${rel(A.at)}` : "Your holdings, plans and watchlist against the market and world events, with next steps"}</small></span><span class="chev" aria-hidden="true">›</span></button>`;
+  }
+  window.onAssessProgress = (p, t) => { assessProg = p >= 1 ? null : { p, t }; renderAssess(); };
+  const tickChips = list => (list || []).map(t => `<button class="chip" data-act="${byS(t) && byS(t).list !== "preview" ? "open" : "preview"}" data-v="${esc(t)}">${esc(t)}</button>`).join("");
+  function renderAssess() {
+    const el = $("#assesssheet"); if (!el) return;
+    const keep = el.scrollTop;
+    el.classList.toggle("open", assessOpen); lockBody();
+    if (!assessOpen) return;
+    const A = S.assessment, bz = isBusy("assess");
+    const head = `<div class="sh-head"><h2>Portfolio assessment</h2><button class="link" data-act="assessclose">Done</button></div>`;
+    const run = `<div class="aic-btns"><button class="${A ? "sm" : "primary"}" data-act="assess" ${bz ? "disabled" : ""}>${bz ? "Assessing…" : A ? "Assess again" : "Assess my portfolio"}</button></div>`;
+    if (bz || !A) {
+      const p = assessProg || { p: 0.04, t: "Starting…" };
+      el.innerHTML = head + `<div class="sh-body"><p class="muted">✦ AI looks at every position (its weight, sector, currency, gain, valuation, trend, Stockit's view, insiders and the crowd), your style, strategies, themes, ideas and watchlist, and sets them against the market's mood (indices, the VIX, rates, oil, gold, the euro) and this week's headlines on geopolitics, central banks and energy. Then it suggests next steps.</p>
+        ${bz ? `<section class="ck-progress" role="status"><div class="ck-prog-h"><span>${esc(p.t)}</span><span class="ck-prog-p">${Math.round(p.p * 100)}%</span></div><div class="ck-prog"><i style="width:${(p.p * 100).toFixed(1)}%"></i></div></section>` : run}
+        <p class="note">One AI request with your positions and amounts. Not financial advice.</p></div>`;
+      el.scrollTop = keep; return;
+    }
+    const mood = A.market && (MOOD_W[A.market.mood] || MOOD_W.mixed);
+    el.innerHTML = head + `<div class="sh-body">
+      <section class="as-top"><span class="as-ring big s${Math.min(4, Math.floor(A.score / 25))}">${A.score}<small>/100</small></span><div><h3 class="as-h">${esc(mask(A.headline))}</h3><p>${esc(mask(A.summary))}</p></div></section>
+      <p class="note">✦ ${PN[A.by] || esc(A.by)}, ${rel(A.at)}, from your portfolio, ${(A.gauges || []).length} market gauges and ${A.heads || 0} headlines. Not financial advice.</p>
+      ${A.actions.length ? `<h3 class="sec">Next steps</h3><ol class="as-acts">${A.actions.map((a, i) => `<li><div class="as-a-h"><b>${esc(mask(a.title))}</b><span class="ck-b b-${a.when === "now" ? "bad" : a.when === "this month" ? "warn" : "add"}">${esc(a.when)}</span></div>
+        <p>${esc(mask(a.why))}</p><div class="as-a-f">${tickChips(a.tickers)}<span class="grow"></span>${a.kept ? `<span class="note">In your strategies ✓</span>` : `<button class="sm" data-act="assesskeep" data-v="${i}">Keep as a strategy</button>`}</div></li>`).join("")}</ol>` : ""}
+      ${A.market ? `<h3 class="sec">Market mood <span class="ck-b b-${mood[1]}">${mood[0]}</span></h3><p>${esc(A.market.text)}</p>
+        ${(A.gauges || []).length ? `<div class="as-g">${A.gauges.map(g => `<span><small>${esc(g.n)}</small><b class="${cls(g.m1)}">${pct(g.m1, 1)}</b></span>`).join("")}</div><p class="note">Change over the last month.</p>` : ""}` : ""}
+      ${A.areas.length ? `<h3 class="sec">Your portfolio</h3>${A.areas.map(a => `<div class="as-area"><div class="as-a-h"><b>${esc(a.name)}</b><span class="ck-b b-${RATE_W[a.rating][1]}">${RATE_W[a.rating][0]}</span></div><p>${esc(mask(a.text))}</p></div>`).join("")}` : ""}
+      ${A.world.length ? `<h3 class="sec">World and markets</h3>${A.world.map(w => `<div class="as-area"><b>${esc(w.theme)}</b><p>${esc(mask(w.effect))}</p></div>`).join("")}` : ""}
+      ${A.risks.length || A.upside.length ? `<div class="as-two">${A.risks.length ? `<div><h3 class="sec">Risks</h3><ul>${A.risks.map(r => `<li>${esc(mask(r))}</li>`).join("")}</ul></div>` : ""}${A.upside.length ? `<div><h3 class="sec">Potential gains</h3><ul>${A.upside.map(r => `<li>${esc(mask(r))}</li>`).join("")}</ul></div>` : ""}</div>` : ""}
+      ${A.watchlist.length ? `<h3 class="sec">Your watchlist</h3>${A.watchlist.map(w => `<div class="as-w">${tickChips([w.s])}<span class="ck-b b-${VERD_W[w.verdict][1]}">${VERD_W[w.verdict][0]}</span><p>${esc(w.why)}</p></div>`).join("")}` : ""}
+      ${run}
+      <p class="note">Built only from the numbers and headlines Stockit had; AI can be wrong. Not financial advice.</p></div>`;
+    el.scrollTop = keep;
+  }
   function glanceHTML(items) {
     const own = items.filter(x => x.list === "own" && x.sh > 0 && x.price != null);
     if (own.length < 2) return "";
@@ -2900,6 +3058,7 @@ function clientApp() {
     newssheet: () => { newsOpen = null; renderNews(); },
     reader: () => { rdId = ""; renderReader(); },
     checksheet: () => { checkOpen = false; renderCheck(); },
+    assesssheet: () => { assessOpen = false; renderAssess(); },
   };
   let pull = null;
   document.addEventListener("touchstart", e => {
@@ -4383,7 +4542,7 @@ function clientApp() {
     }, 300);
     renderCheck();
   };
-  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || addOpen || cfgOpen || aiOpen || raOpen || !!rdId)); }
+  function lockBody() { document.body.classList.toggle("locked", !!(openSym || newsOpen || checkOpen || assessOpen || addOpen || cfgOpen || aiOpen || raOpen || !!rdId)); }
 
   // ---- interactions ----
   const shareText = (title, by, body) => `${title}\n\n${String(body || "").replace(/\s*\[\d+(?:\s*,\s*\d+)*\]/g, "")}\n\n✦ Written by ${PN[by] || by} in Stockit. Not financial advice.`;
@@ -4407,6 +4566,10 @@ function clientApp() {
       case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
       case "lot": send("lot", { s: v, id: t.dataset.id || "" }); break;
+      case "assessopen": assessOpen = true; renderAssess(); $("#assesssheet").scrollTop = 0; break;
+      case "assessclose": assessOpen = false; renderAssess(); break;
+      case "assess": assessProg = { p: 0.03, t: "Starting…" }; send("assess", {}); renderAssess(); break;
+      case "assesskeep": send("assesskeep", { v }); break;
       case "glance": S.settings.glanceOpen = S.settings.glanceOpen === false; send("set", { k: "glanceOpen", v: S.settings.glanceOpen }); render(); break;
       case "wtrend": S.settings.widgetTrend = v; send("set", { k: "widgetTrend", v }); renderCfg(); break;
       case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
@@ -4463,7 +4626,7 @@ function clientApp() {
       case "checkfind": checkOpen = false; renderCheck(); addOpen = true; results = null; renderAdd(); { const q = $("#q"); if (q) { q.value = v; } } break;
       case "ideaexplain": ideaExplain = ideaExplain === v ? null : v; render(); break;
       case "gotab": cfgOpen = false; renderCfg(); tab = v; send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
-      case "preview": detailOver = !!rdId; openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
+      case "preview": detailOver = !!rdId || assessOpen; openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
       case "addpreview": send("addpreview", { s: t.dataset.s, v }); previewWait = null; break;
       case "themeadd": {
         const tx = themeText.trim().slice(0, 120);
@@ -4472,7 +4635,7 @@ function clientApp() {
         send("cfg", { k: "ideaThemes", v: list }); render(); break;
       }
       case "themerm": { const list = (S.cfg.ideaThemes || []).filter((_, i) => i !== +v); S.cfg.ideaThemes = list; send("cfg", { k: "ideaThemes", v: list.length ? list : [""] }); render(); break; }
-      case "open": openSym = v; explainKey = null; rmArmed = null; renderDetail(); send("detail", { s: v }); $("#detail").scrollTop = 0; break;
+      case "open": if (assessOpen) detailOver = true; openSym = v; explainKey = null; rmArmed = null; renderDetail(); send("detail", { s: v }); $("#detail").scrollTop = 0; break;
       case "close": openSym = null; renderDetail(); break;
       case "range": range = v; send("set", { k: "range", v }); renderDetail(); break;
       case "explain": explainKey = explainKey === v ? null : v; renderDetail(); break;
@@ -5202,6 +5365,25 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
 .arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)} .arr-b.wid.on{background:var(--up)}
 .srow.col{flex-direction:column;align-items:flex-start;gap:4px} .wchip{margin:2px 2px 0 0;font-size:calc(12px * var(--ts))}
+/* ✦ Portfolio assessment */
+#assesssheet{z-index:12}
+#assesssheet .sh-head::before{content:"";position:absolute;top:5px;left:50%;width:36px;height:5px;margin-left:-18px;border-radius:3px;background:var(--rule)}
+.as-card{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--sheet);border:1px solid var(--rule);border-radius:12px;padding:12px 14px;margin:0 0 12px}
+.as-t{flex:1;min-width:0} .as-t b{display:block;font-weight:700} .as-t small{display:block;color:var(--muted);font-size:calc(13px * var(--ts));margin-top:2px;line-height:1.4}
+.as-card .chev{color:var(--muted);font-size:20px}
+.as-ring{flex:none;width:44px;height:44px;border-radius:22px;display:grid;place-items:center;font-weight:800;font-size:16px;color:var(--signal);background:var(--signal-wash);border:3px solid var(--signal)}
+.as-ring.s0,.as-ring.s1{color:var(--danger);border-color:var(--danger);background:color-mix(in srgb, var(--danger) 10%, transparent)}
+.as-ring.s2{color:var(--amber);border-color:var(--amber);background:color-mix(in srgb, var(--amber) 12%, transparent)}
+.as-ring.s3,.as-ring.s4{color:var(--up);border-color:var(--up);background:color-mix(in srgb, var(--up) 10%, transparent)}
+.as-ring.big{width:76px;height:76px;border-radius:38px;font-size:28px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1} .as-ring.big small{font-size:11px;font-weight:600;opacity:.8}
+.as-top{display:flex;gap:14px;align-items:flex-start;margin:14px 0 6px} .as-h{margin:0 0 4px;font:700 calc(19px * var(--ts))/1.3 var(--display)} .as-top p{margin:0;line-height:1.5}
+.as-acts{margin:0;padding-left:1.3em} .as-acts li{margin:0 0 12px} .as-acts p,.as-area p,.as-w p{margin:4px 0;line-height:1.5;color:var(--ink-2)}
+.as-a-h{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.as-a-f{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.as-area{background:var(--sheet);border:1px solid var(--rule);border-radius:10px;padding:10px 12px;margin:8px 0}
+.as-g{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0 2px} .as-g span{background:var(--sheet);border:1px solid var(--rule);border-radius:8px;padding:6px 8px} .as-g small{display:block;color:var(--muted);font-size:calc(11px * var(--ts))} .as-g b.up{color:var(--up)} .as-g b.down{color:var(--danger)}
+.as-two ul{margin:4px 0;padding-left:1.2em} .as-two li{margin:4px 0;line-height:1.45}
+.as-w{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--rule)} .as-w p{flex-basis:100%}
 /* At a glance: every stock you own, four to a row */
 .glance{margin:4px 0 12px;border:1px solid var(--rule);border-radius:12px;background:var(--sheet);overflow:hidden}
 .gl-h{display:flex;align-items:baseline;gap:8px;width:100%;padding:9px 12px;text-align:left}
@@ -5316,6 +5498,7 @@ const buildHTML = () => `<!doctype html><html data-theme="${initTheme}" data-fon
 <div id="aisheet" class="sheet" aria-label="AI settings"></div>
 <div id="newssheet" class="sheet" aria-label="TL;DR"></div>
 <div id="checksheet" class="sheet" aria-label="Check my portfolio"></div>
+<div id="assesssheet" class="sheet" aria-label="Portfolio assessment"></div>
 <div id="reader" class="sheet" aria-label="Reader"></div>
 <div id="readsheet" class="sheet" aria-label="Text being read"></div>
 <div id="player" hidden role="region" aria-label="Reading aloud">

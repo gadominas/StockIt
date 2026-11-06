@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.26.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.27.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -133,6 +133,19 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## ✦ Portfolio assessment
+
+<img src="docs/screenshots/40-assessment.png" width="250" align="right" alt="Portfolio assessment: a score of 64 out of 100, a headline and summary, and next steps with their timing and a button to keep each as a strategy">
+
+On **Portfolio**, tap **✦ Portfolio assessment** (under the briefing), then **Assess my portfolio**. ✦ AI looks at everything Stockit knows and writes one report:
+
+- **What it reads:** every position (its share of your money, sector, currency, gain, 1, 6 and 12-month change, valuation, beta, analysts' target, trend, Stockit's view, insider trades and the crowd's mood), your investing style, strategies, themes and latest ideas, and your watchlist; then the market's mood from nine gauges (S&P 500, Nasdaq, Euro Stoxx 50, DAX, the VIX, the US 10-year yield, oil, gold and the euro) and this week's headlines on markets, geopolitics, central banks and energy.
+- **What you get:** a score out of 100 with a headline and summary; **Next steps**, most important first, each with its timing (now, this month, this quarter), the stocks involved and **Keep as a strategy**; the **market mood** (risk-on, mixed or risk-off) with the gauges' month; ratings for diversification, risk, quality and valuation, income, currencies and fit with your plans; what current **world and market events** mean for your holdings; **risks** and **potential gains**; and add, wait or drop for each watchlist stock.
+
+The last assessment stays until you run it again; tap a ticker to open the stock. It's one AI request with your positions and amounts, and not financial advice.
+
+<br clear="right">
 
 ## The same company on several markets
 
@@ -400,6 +413,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Assess your whole portfolio | **Portfolio › ✦ Portfolio assessment** › **Assess my portfolio** |
 | Hold one company on two markets | On its page: **+ Add a position on another market or in another currency** |
 | See what insiders bought and sold | Add a Quiver key in **Settings › News and signals**, then open a US stock: **Insider trades** |
 | Move, pin or highlight a stock | **Arrange** next to the count (or long-press a stock): drag ≡, tap 📌 or ★ |
