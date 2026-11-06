@@ -2,6 +2,20 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.27.0 (2026-11-06): Your portfolio, assessed
+
+- ✦ **Portfolio assessment**: AI weighs every position, your plans and watchlist against the market's mood and world events.
+- 🧭 **Next steps**: A short list of what to do, now, this month or this quarter; keep any as a strategy.
+- 🌍 **Market and world**: Risk-on or risk-off from nine gauges, and what this week's headlines mean for your stocks.
+
+**Changes**
+
+- Portfolio › ✦ Portfolio assessment: a score out of 100, headline and summary, next steps, market mood, ratings for diversification, risk, quality and valuation, income, currencies and fit with your plans, world and market events, risks, potential gains and a verdict for each watchlist stock
+- It reads each position's weight, sector, currency, gain, 1/6/12-month change, P/E, dividend, beta, analysts' target, trend, Stockit's view, insiders and the crowd; your style, strategies, themes, ideas and watchlist; nine market gauges (S&P 500, Nasdaq, Euro Stoxx 50, DAX, VIX, US 10-year yield, oil, gold, euro); and this week's headlines on markets, geopolitics, central banks and energy
+- Each next step has its timing and stocks, and Keep as a strategy adds it to My strategies
+- Sectors are looked up first for stocks that don't have one yet; a progress bar shows each step
+- Token usage counts Portfolio assessments separately
+
 ## 1.26.0 (2026-11-06): Your portfolio at a glance
 
 - 👀 **At a glance**: Every stock you own in a compact grid under your total: ticker, value and gain, eight stocks in two rows.
