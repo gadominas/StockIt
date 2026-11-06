@@ -2,6 +2,16 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.26.0 (2026-11-06): Your portfolio at a glance
+
+- 👀 **At a glance**: Every stock you own in a compact grid under your total: ticker, value and gain, eight stocks in two rows.
+
+**Changes**
+
+- Portfolio: At a glance, under the portfolio's value: each owned stock as a small tile, four to a row, biggest first (pinned ones first): the ticker, then its value and the gain or loss since you bought, in your currency
+- Tap a tile for the stock's page; tap the At a glance line to fold or unfold it (remembered)
+- Highlighted stocks keep their amber edge; in privacy mode the tiles show the gain as a percentage
+
 ## 1.25.0 (2026-11-06): Tickers you can tap
 
 - 🔗 **Tap a ticker in an article**: Tickers quoted in an article open that stock's page, right above the article.

@@ -4,6 +4,23 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.26.0",
+      "date": "2026-11-06",
+      "title": "Your portfolio at a glance",
+      "highlights": [
+        {
+          "icon": "👀",
+          "title": "At a glance",
+          "text": "Every stock you own in a compact grid under your total: ticker, value and gain, eight stocks in two rows."
+        }
+      ],
+      "changes": [
+        "Portfolio: At a glance, under the portfolio's value: each owned stock as a small tile, four to a row, biggest first (pinned ones first): the ticker, then its value and the gain or loss since you bought, in your currency",
+        "Tap a tile for the stock's page; tap the At a glance line to fold or unfold it (remembered)",
+        "Highlighted stocks keep their amber edge; in privacy mode the tiles show the gain as a percentage"
+      ]
+    },
+    {
       "version": "1.25.0",
       "date": "2026-11-06",
       "title": "Tickers you can tap",
