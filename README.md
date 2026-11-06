@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.23.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.24.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -132,6 +132,14 @@ Most stock apps show you a price and a wall of headlines. Stockit is made for a 
 | 🧩 **Built with** | The last section of Settings lists the [shared blueprints](https://github.com/gadominas/app-blueprints) Stockit follows, each linked at the exact version used (see [docs/BLUEPRINTS.md](docs/BLUEPRINTS.md)). |
 | 📲 **Widget** | Today's move for your portfolio and your biggest movers on the Home Screen, in the same frame and colours as the other apps' widgets. |
 | ⬆️ **Updates itself** | When a new version is out, Stockit shows its three best features and installs it with one tap. |
+
+## The same company on several markets
+
+Bought the same company in two places, say Nike on the NYSE in dollars and in Frankfurt in euros? If Yahoo has the second listing (NKE.DE), add it as its own stock. If it doesn't, keep one stock and add a **position** to it:
+
+- On the stock's page, under your shares, tap **+ Add a position on another market or in another currency**, then enter the shares, the average price you paid, its currency (EUR, USD, GBP…) and where (for example *Frankfurt*).
+- **Your positions** then lists each one with its value and gain in its own currency. Tap one to change or remove it; **Edit shares** asks which one.
+- The stock's total shares and average price (in the currency it's priced in, at today's rates) add up all positions, so the portfolio, the widget, the briefing and the portfolio check count them together.
 
 ## Insider trades
 
@@ -389,6 +397,7 @@ API usage is billed by Anthropic or OpenAI, separately from any Claude or ChatGP
 | See the price at any moment | Open a stock and touch or drag across its chart; **1D** and **1W** show the day and the week |
 | See everything in euros (or dollars) | **Settings › Portfolio › Show your money in** |
 | See which markets are open | Look for **Open** or **Closed** under each stock, or open **Markets** |
+| Hold one company on two markets | On its page: **+ Add a position on another market or in another currency** |
 | See what insiders bought and sold | Add a Quiver key in **Settings › News and signals**, then open a US stock: **Insider trades** |
 | Move, pin or highlight a stock | **Arrange** next to the count (or long-press a stock): drag ≡, tap 📌 or ★ |
 | Hide your amounts for a demo | Tap the small **eye** beside **Updated**; tap again to show them |

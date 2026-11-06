@@ -10,6 +10,7 @@
  *  - Prices and a year of history, P/E, market cap, dividend, analyst view, 52-week range, explained in plain words
  *  - Headlines from Yahoo Finance and the web (Google News), plus the crowd's mood from StockTwits
  *  - Flash: each stock's top headlines, a TL;DR of any headline (✦ AI or taken from the article), then the original source
+ *  - Positions: the same company held on several markets or in several currencies, under one stock
  *  - Insider trades (SEC Form 4) through Quiver Quantitative with your own key: what insiders bought and sold, in signals, stories and ideas
  *  - Privacy mode: one tap on the eye hides your amounts (value, gains, shares, average prices) for demos
  *  - ✦ Suggested strategies from your portfolio, watchlist and plans, refreshed on a schedule you choose; keep any as your own, and edit every strategy
@@ -30,7 +31,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.23.0';
+const VERSION = '1.24.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -567,7 +568,7 @@ function fxRate(cur, prev, home = homeCur()) {
 }
 async function loadFx(force = false) {
   const home = homeCur();
-  const curs = [...new Set(stocks.map(x => normCur((market[x.s] || {}).cur)[0]).filter(c => c && c !== home))];
+  const curs = [...new Set(stocks.flatMap(x => [normCur((market[x.s] || {}).cur)[0]].concat((x.lots || []).map(l => normCur(l.cur)[0]))).filter(c => c && c !== home))];
   await pool(curs.filter(c => force || !fxRates[c + home] || Date.now() - fxRates[c + home].at > 30 * 60e3), 3, async c => {
     try {
       const { meta, pts } = await yChart(`${c}${home}=X`, "5d", "1d");
@@ -576,6 +577,7 @@ async function loadFx(force = false) {
     } catch (e) { console.log(`Rate ${c}→${home}: ${e}`); }
   });
   write("fx", fxRates);
+  for (const x of stocks) if (x.lots) syncLots(x);   // positions in other currencies follow today's rates
 }
 
 // ---------- the crowd's mood: StockTwits posts tagged bullish or bearish ----------
@@ -1598,7 +1600,7 @@ async function addCheckShot() {
 async function ensureRate(cur) {   // a rate to your currency for a screenshot's currency, if Stockit doesn't have it yet
   const [c] = normCur(cur), home = homeCur();
   if (!c || c === home || fxRates[c + home]) return;
-  try { const { meta, pts } = await yChart(`${c}${home}=X`, "5d", "1d"); const q = priceFrom(meta, pts); if (q.price) fxRates[c + home] = { rate: q.price, prev: q.prev || q.price, at: Date.now() }; } catch (e) {}
+  try { const { meta, pts } = await yChart(`${c}${home}=X`, "5d", "1d"); const q = priceFrom(meta, pts); if (q.price) { fxRates[c + home] = { rate: q.price, prev: q.prev || q.price, at: Date.now() }; write("fx", fxRates); } } catch (e) {}
 }
 function convertCur(v, from, to) {   // between any two currencies, through yours; null when a rate is missing
   if (v == null || !isFinite(v)) return null;
@@ -1870,7 +1872,7 @@ function clientState() {
   const view = x => {
       const m = market[x.s] || {};
       return {
-        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, idx: stocks.indexOf(x),
+        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, lots: x.lots || null, idx: stocks.indexOf(x),
         price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
         st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null, ins: m.ins || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
@@ -1966,6 +1968,17 @@ function inviteIfDue() {
 
 // Shares and average price, in a native prompt (decimal keypad).
 async function editHolding(x) {
+  if (x.lots && x.lots.length > 1) {   // several positions: pick one, or add another
+    const pick = new Alert();
+    pick.title = `${x.s}: your positions`;
+    for (const l of x.lots) pick.addAction(`${l.sh} shares${l.cost ? " at " + l.cost + " " + l.cur : ""}${l.where ? " · " + l.where : ""}`);
+    pick.addAction("Add another position");
+    pick.addCancelAction("Cancel");
+    const r = await pick.present();
+    if (r === -1) return false;
+    return editLot(x, r < x.lots.length ? x.lots[r].id : null);
+  }
+  if (x.lots && x.lots.length === 1) return editLot(x, x.lots[0].id);
   const m = market[x.s] || {};
   const al = new Alert();
   al.title = `${x.s}: your shares`;
@@ -1977,6 +1990,51 @@ async function editHolding(x) {
   if (await al.present() !== 0) return false;
   const n = v => { const k = parseFloat(String(v || "").replace(",", ".")); return isFinite(k) && k > 0 ? k : 0; };
   x.sh = n(al.textFieldValue(0)); x.cost = n(al.textFieldValue(1));
+  if (x.sh > 0) x.list = "own";
+  return true;
+}
+// Positions: one company held in several places — say NKE on the NYSE in dollars, and in Frankfurt in euros when
+// Yahoo has no listing for the German one. Each position keeps its own shares, average price and currency; the
+// stock's shares and average price (in the currency it's priced in, at today's rate) are worked out from them.
+function syncLots(x) {
+  if (!Array.isArray(x.lots) || !x.lots.length) { delete x.lots; return; }
+  const cur = normCur((market[x.s] || {}).cur || "USD")[0];
+  let sh = 0, cost = 0, known = true;
+  for (const l of x.lots) {
+    sh += l.sh || 0;
+    const c = l.cost > 0 ? convertCur(l.cost, l.cur || cur, cur) : null;
+    if (c == null) known = false; else cost += l.sh * c;
+  }
+  x.sh = round(sh, 6);
+  x.cost = known && sh > 0 ? round(cost / sh, 4) : 0;
+}
+async function editLot(x, id) {
+  const m = market[x.s] || {}, cur0 = normCur(m.cur || "USD")[0], where0 = m.exch || "";
+  if (!x.lots) x.lots = x.sh > 0 ? [{ id: "l1", sh: x.sh, cost: x.cost || 0, cur: cur0, where: where0 }] : [];
+  const lot = id ? x.lots.find(l => l.id === id) : null;
+  const al = new Alert();
+  al.title = lot ? `${x.s}: ${lot.where || "this position"}` : `${x.s}: another position`;
+  al.message = lot ? "Shares, the average price you paid and its currency." : `Shares of the same company bought on another market or in another currency, for example in Frankfurt in euros. Stockit prices them with ${x.s} (${[where0, cur0].filter(Boolean).join(", ")}) and converts at today's rate.`;
+  al.addTextField("Shares", lot ? String(lot.sh) : "").setDecimalPadKeyboard();
+  al.addTextField("Average price paid", lot && lot.cost ? String(lot.cost) : "").setDecimalPadKeyboard();
+  al.addTextField("Currency of that price (EUR, USD, GBP…)", lot ? lot.cur : homeCur());
+  al.addTextField("Where (optional), e.g. Frankfurt", lot ? lot.where || "" : "");
+  al.addAction("Save");
+  if (lot) al.addDestructiveAction("Remove this position");
+  al.addCancelAction("Cancel");
+  const r = await al.present();
+  if (r === -1) { if (x.lots.length < 2) { delete x.lots; } return false; }
+  if (lot && r === 1) x.lots = x.lots.filter(l => l !== lot);
+  else {
+    const n = v => { const k = parseFloat(String(v || "").replace(/\s/g, "").replace(",", ".")); return isFinite(k) && k > 0 ? k : 0; };
+    const sh = n(al.textFieldValue(0)), cost = n(al.textFieldValue(1));
+    const cur = (String(al.textFieldValue(2) || "").trim().toUpperCase().match(/[A-Z]{3}/) || [cur0])[0], where = String(al.textFieldValue(3) || "").trim().slice(0, 40);
+    if (!sh) { toast("Add how many shares"); if (x.lots.length < 2 && !lot) delete x.lots; return false; }
+    await ensureRate(cur);
+    if (lot) Object.assign(lot, { sh, cost, cur, where });
+    else x.lots.push({ id: "l" + Date.now().toString(36), sh, cost, cur, where });
+  }
+  syncLots(x);
   if (x.sh > 0) x.list = "own";
   return true;
 }
@@ -2063,6 +2121,7 @@ async function handle(m) {
     }
     case "shot": return importScreenshot(m.list === "own" ? "own" : "watch");
     case "holding": if (x && await editHolding(x)) { saveAll(); push(); saveWidget(widgetSnapshot()); } return;
+    case "lot": if (x && await editLot(x, m.id || null)) { saveAll(); push(); saveWidget(widgetSnapshot()); } else push(); return;
     case "reorder": {   // your own order for one list, from dragging in Arrange; the other list keeps its places
       const list = m.v === "own" ? "own" : "watch", want = (Array.isArray(m.order) ? m.order : []).map(String);
       const mine = stocks.filter(y => (y.list === "own") === (list === "own"));
@@ -3136,7 +3195,20 @@ function clientApp() {
       <div><small>Today</small><b class="${cls(dh != null ? dh : dayPct(x))}">${P(dh != null ? signed(dh, HOME()) + (foreign(x.cur) ? `<small class="orig">${signed(x.sh * (x.price - x.prev), x.cur)}</small>` : "") : x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—")}${priv() ? ` <small>${pct(dayPct(x))}</small>` : ""}</b></div>
       <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? P(homeMoney(g, x.cur, false, true)) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
       ${foreign(x.cur) && fxr(x.cur) != null ? `<p class="note">In ${esc(HOME())} at today's rate; the stock trades in ${esc(x.cur)}.</p>` : ""}
-      ${x.cost ? `<p class="note">Average price ${P(money(x.cost, x.cur))}</p>` : ""}</section>`;
+      ${x.cost ? `<p class="note">Average price ${P(money(x.cost, x.cur))}${x.lots && x.lots.length > 1 ? " across your positions, at today's rates" : ""}</p>` : ""}
+      ${lotsHTML(x)}</section>`;
+  }
+  // Positions on other markets or in other currencies (same company, one stock in Stockit)
+  function lotsHTML(x) {
+    const lots = x.lots || [];
+    const add = `<button class="link small" data-act="lot" data-v="${esc(x.s)}">+ Add a position on another market or in another currency</button>`;
+    if (lots.length < 2) return `<p class="lot-add">${add}</p>`;
+    const conv = (v, from, to) => { const a = fxr(from), b2 = fxr(to); return v == null || a == null || b2 == null ? null : v * a / b2; };
+    return `<div class="lots"><h4>Your positions</h4>${lots.map(l => {
+      const px = conv(x.price, x.cur, l.cur), val = px != null ? l.sh * px : null, g = val != null && l.cost ? val - l.sh * l.cost : null;
+      return `<button class="lot" data-act="lot" data-v="${esc(x.s)}" data-id="${esc(l.id)}"><span class="lot-w"><b>${esc(l.where || "Position")}</b><small>${P(nf(l.sh, l.sh % 1 ? 2 : 0))} shares${l.cost ? " · paid " + P(money(l.cost, l.cur)) : ""}</small></span>
+        <span class="lot-v"><b>${val != null ? P(money(val, l.cur)) : "—"}</b>${g != null ? `<small class="${cls(g)}">${P(signed(g, l.cur))} (${pct((px / l.cost - 1) * 100, 1)})</small>` : ""}</span><span class="chev" aria-hidden="true">›</span></button>`;
+    }).join("")}<p class="lot-add">${add}</p></div>`;
   }
   function signalHTML(x) {
     if (x.sig) return `<section class="sigsec"><h3 class="sec">Stockit's view</h3>
@@ -4267,6 +4339,7 @@ function clientApp() {
     switch (act) {
       case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
+      case "lot": send("lot", { s: v, id: t.dataset.id || "" }); break;
       case "wtrend": S.settings.widgetTrend = v; send("set", { k: "widgetTrend", v }); renderCfg(); break;
       case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
       case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : k === "wpin" ? (y[k] ? `${v} is on the widget` : `${v} left the widget`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
@@ -5058,6 +5131,14 @@ html[data-font=serif] .tl-story p{font-family:var(--serif)}
 .arr-b .pin-i{margin:0;width:17px;height:17px;color:inherit}
 .arr-b.on{color:var(--paper);background:var(--signal);box-shadow:none} .arr-b.star.on{background:var(--amber)} .arr-b.wid.on{background:var(--up)}
 .srow.col{flex-direction:column;align-items:flex-start;gap:4px} .wchip{margin:2px 2px 0 0;font-size:calc(12px * var(--ts))}
+/* Positions on several markets */
+.lot-add{margin:8px 0 0}
+.lots{margin-top:12px;border-top:1px solid var(--rule);padding-top:8px}
+.lots h4{margin:0 0 4px;font-size:calc(13px * var(--ts));color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+.lot{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 0;border-bottom:1px solid var(--rule)}
+.lot-w{flex:1;min-width:0} .lot-w b{display:block} .lot-w small,.lot-v small{display:block;font-size:calc(12.5px * var(--ts));color:var(--muted)}
+.lot-v{text-align:right} .lot-v small.up{color:var(--up)} .lot-v small.down{color:var(--danger)}
+.lot .chev{color:var(--muted);font-size:18px}
 /* Insider trades */
 .insnote{margin:8px 0 0;padding:8px 10px;border-radius:9px;background:var(--sheet);border-left:3px solid var(--rule);font-size:calc(14px * var(--ts));line-height:1.45}
 .insnote.up{border-left-color:var(--up)} .insnote.down{border-left-color:var(--danger)}
