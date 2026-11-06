@@ -1,0 +1,23 @@
+const { run } = require("../harness");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const errors = [];
+  let { E, p } = await run({}); p.catch(e => errors.push("SCRIPT " + e.stack)); await wait(250);
+  let w = E.getDom().window, d = w.document;
+  const tap = sel => { const el = typeof sel === "string" ? d.querySelector(sel) : sel; if (!el) throw new Error("no element " + sel); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true })); };
+  tap('[data-act="addopen"]'); await wait(30);
+  d.querySelector("#paste").value = "AAPL 12 @ 168\nNVDA 30 @ 96\nMSFT 4 @ 410\nKO 20 @ 52\nJNJ 8\nASML 3 @ 820\nVWCE.DE 40 @ 98\nHSBA.L 200 @ 640"; tap('[data-act="paste"]'); await wait(900);
+  tap('[data-act="addclose"]'); tap('[data-act="refresh"]'); await wait(1200);
+  const tiles = () => [...d.querySelectorAll(".gl-t")].map(t => t.textContent.replace(/\s+/g, " ").trim());
+  console.log("A tiles:", tiles().length, "|", tiles().join(" | "));
+  tap(".gl-h"); await wait(60);
+  console.log("B folded:", d.querySelectorAll(".gl-t").length, "| saved:", JSON.parse(E.files["/docs/Stockit/settings.json"]).glanceOpen);
+  tap(".gl-h"); await wait(60);
+  tap(".gl-t"); await wait(60);
+  console.log("C tap opens:", d.querySelector("#detail").classList.contains("open"), (d.querySelector("#detail h2") || {}).textContent);
+  tap('[data-act="close"]'); await wait(20); tap("#privbtn"); await wait(40);
+  console.log("D private:", tiles().slice(0, 3).join(" | "));
+  E.finish(); await p;
+  console.log("errors:", errors.length ? errors.join("; ") : "none", "| JS errors:", E.log.jsErrors || "none");
+  process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });

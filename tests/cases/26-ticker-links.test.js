@@ -1,0 +1,26 @@
+const { run } = require("../harness");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const errors = [];
+  let { E, p } = await run({}); p.catch(e => errors.push("SCRIPT " + e.stack)); await wait(250);
+  let w = E.getDom().window, d = w.document;
+  const tap = sel => { const el = typeof sel === "string" ? d.querySelector(sel) : sel; if (!el) throw new Error("no element " + sel); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true })); };
+  tap('[data-act="addopen"]'); await wait(30);
+  d.querySelector("#paste").value = "NVDA 30 @ 96"; tap('[data-act="paste"]'); await wait(800);
+  tap('[data-act="addclose"]'); tap('[data-act="refresh"]'); await wait(1000);
+  const y = JSON.parse(E.files["/docs/Stockit/market.json"]).NVDA.news.find(n => n.l.includes("finance.yahoo"));
+  tap('[data-act="tab"][data-v="flash"]'); await wait(30);
+  tap(`.fl-h[data-v="${y.l}"]`); await wait(300); tap('[data-act="rdopen"]'); await wait(600);
+  const links = [...d.querySelectorAll("#reader .tk")];
+  console.log("A links in the article:", links.map(l => l.textContent + "→" + l.dataset.v).join(", "));
+  tap(links.find(l => l.dataset.v === "KO")); await wait(500);
+  const det = d.querySelector("#detail");
+  console.log("B stock page:", det.classList.contains("open"), "| above the reader:", det.classList.contains("over"), "| shows:", (det.querySelector("h2") || {}).textContent, "| price:", !!det.querySelector(".dprice"), "| add buttons:", [...det.querySelectorAll('[data-act="addpreview"]')].map(b => b.textContent).join(", "));
+  tap('#detail [data-act="close"]'); await wait(60);
+  console.log("C closed: detail", det.classList.contains("open"), "| reader still open:", d.querySelector("#reader").classList.contains("open"), "| over cleared:", !det.classList.contains("over"));
+  tap(links.find(l => l.dataset.v === "MSFT") && [...d.querySelectorAll("#reader .tk")].find(l => l.dataset.v === "MSFT")); await wait(400);
+  console.log("D $MSFT opens:", (det.querySelector("h2") || {}).textContent);
+  E.finish(); await p;
+  console.log("errors:", errors.length ? errors.join("; ") : "none", "| JS errors:", E.log.jsErrors || "none");
+  process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });

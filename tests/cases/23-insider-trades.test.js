@@ -1,0 +1,51 @@
+const { run } = require("../harness");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const errors = [];
+  let { E, p } = await run({}); p.catch(e => errors.push("SCRIPT " + e.stack)); await wait(250);
+  let w = E.getDom().window, d = w.document;
+  const tap = sel => { const el = typeof sel === "string" ? d.querySelector(sel) : sel; if (!el) throw new Error("no element " + sel); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true })); };
+  E.kc["STOCKIT_ANTHROPIC_KEY"] = "sk-ant-api03-ABCDEFGHIJKLMNOP1234";
+  tap('[data-act="addopen"]'); await wait(30);
+  d.querySelector("#paste").value = "NVDA 30 @ 96\nAAPL 12 @ 168\nVWCE.DE 10 @ 100"; tap('[data-act="paste"]'); await wait(800);
+  tap('[data-act="addclose"]'); tap('[data-act="refresh"]'); await wait(1200);
+  console.log("A without a key: Quiver calls", (E.log.quiver || []).length, "| NVDA tile:", [...d.querySelectorAll(".row")].length && "n/a");
+  E.kc["STOCKIT_QUIVER_KEY"] = "qk-test";
+  tap('[data-act="refresh"]'); await wait(1500);
+  const m = JSON.parse(E.files["/docs/Stockit/market.json"]);
+  console.log("B calls:", (E.log.quiver || []).join(" "), "| VWCE.DE skipped:", !m["VWCE.DE"].ins);
+  const n = m.NVDA.ins, a = m.AAPL.ins;
+  console.log("  NVDA:", n.mood, "buys", n.buys, "by", n.buyers, "$" + n.buyV, "| exec", n.exec && n.exec.title, "| sells", n.sells, "$" + n.sellV, "| other", n.other, "| big stake", n.big && n.big.stake.toFixed(2), "| rows", n.rows.length);
+  console.log("  AAPL:", a.mood, "sells", a.sells, "by", a.sellers, "$" + a.sellV, "| ticker cleaned:", a.rows.length);
+  tap('.row[data-v="NVDA"]'); await wait(60);
+  const det = d.querySelector("#detail");
+  console.log("C tile:", [...det.querySelectorAll(".tile")].find(t => /Insiders/.test(t.textContent)).textContent.replace(/\s+/g, " ").trim());
+  console.log("  note:", (det.querySelector(".insnote") || {}).textContent);
+  console.log("  section:", det.querySelector(".ins .ins-sum").textContent.replace(/\s+/g, " ").trim(), "|", [...det.querySelectorAll(".ins-r")].map(r => r.textContent.replace(/\s+/g, " ").trim()).slice(0, 3).join(" || "));
+  tap('#detail [data-act="explain"][data-v="insiders"]'); await wait(20);
+  console.log("  explain:", det.querySelector(".explain").textContent.slice(0, 80));
+  tap('[data-act="close"]'); await wait(20);
+  tap('[data-act="tab"][data-v="flash"]'); await wait(30);
+  console.log("D flash:", [...d.querySelectorAll(".fl-r")].map(e => e.textContent.replace(/\s+/g, " ").trim()).filter(t => /Insiders/.test(t)).join(" | "));
+  // E: AI sees it
+  tap('[data-act="tab"][data-v="own"]'); await wait(20);
+  if (d.querySelector(".brief.folded")) { tap(".brief-fold"); await wait(20); }
+  const bodies = () => (E.log.aiBodies || E.log.anthropic || []);
+  tap('[data-act="briefing"]'); await wait(800);
+  const all = JSON.stringify(E.log);
+  console.log("E briefing prompt has insiders:", /Insider trades \(SEC Form 4 via Quiver/.test(all), "| research hint:", /purchases while the price is above its 200-day average/.test(all));
+  tap('[data-act="tab"][data-v="ideas"]'); await wait(40); tap('[data-act="ideas"]'); await wait(1500);
+  const all2 = JSON.stringify(E.log);
+  console.log("F ideas candidates include insider buys:", /PLTR: insiders bought \$2\.1M/.test(all2) || /PLTR: insiders bought/.test(all2), "| OXY 10% owner:", /OXY: insiders bought[^"]*10% owner/.test(all2), "| tiny left out:", !/TINY: insiders/.test(all2));
+  console.log("  idea tiles:", [...d.querySelectorAll(".idea .tile")].filter(t => /Insiders/.test(t.textContent)).map(t => t.closest(".idea").id + ": " + t.textContent.replace(/\s+/g, " ").trim()).join(" | ") || "(none)");
+  E.finish(); await p;
+  // G: a plan without insider data
+  const r = await run({ files: E.files, kc: E.kc, quiverPlan: "hobby" }); await wait(300);
+  const w2 = r.E.getDom().window, d2 = w2.document;
+  w2.__nav("stockit://a?d=" + encodeURIComponent(JSON.stringify({ type: "refresh", force: true }))); await wait(1500);
+  d2.querySelector('[data-act="cfgopen"]').dispatchEvent(new w2.MouseEvent("click", { bubbles: true })); await wait(40);
+  console.log("G 403:", [...d2.querySelectorAll("#cfgsheet .srow")].find(s => /Quiver key \(optional\)/.test(s.textContent)).textContent.replace(/\s+/g, " ").trim().slice(0, 160));
+  r.E.finish(); await r.p;
+  console.log("errors:", errors.length ? errors.join("; ") : "none", "| JS errors:", E.log.jsErrors || "none");
+  process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });

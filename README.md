@@ -503,6 +503,10 @@ Stockit follows five shared blueprints: in-app updates, settings, AI configurati
 | The widget shows **⟳ Updated …** in amber | Open Stockit once; the widget updates from it |
 | An update says GitHub is serving the old version | Wait a few minutes after a release and tap **Try again** |
 
+## Tests
+
+`tests/` runs the real `Stockit.js` in Node with Scriptable's APIs replaced by stand-ins and taps through 28 scenarios, from first start to the portfolio assessment; the same setup takes these screenshots. `cd tests && npm install && node run.js`. See [docs/TESTING.md](docs/TESTING.md).
+
 ## Contributing
 
 Issues and pull requests are welcome. Keep everything in a single Scriptable file, with no build step, and test on a real device. To release, follow [docs/RELEASING.md](docs/RELEASING.md).

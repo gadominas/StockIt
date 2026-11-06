@@ -5,6 +5,7 @@
 ## Steps
 
 1. **Bump the version** in `Stockit.js`: `const VERSION = '1.1.0';`. Use [semantic versioning](https://semver.org): a new feature bumps the middle number, a fix-only release the last.
+   Then **run the tests**: `cd tests && node run.js`. Release only when every scenario passes; see [TESTING.md](TESTING.md).
 2. **Add a release at the top of `releases.json`**, with the same version.
 3. **Regenerate the changelog**: `node tools/changelog.js`.
 4. **Commit everything to `main`**: the script first, then `releases.json` and `CHANGELOG.md`. In that order the update offer can never appear before the new script is there to download.

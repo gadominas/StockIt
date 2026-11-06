@@ -1,0 +1,61 @@
+const { run } = require("../harness");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const errors = []; process.on("unhandledRejection", e => errors.push("UNHANDLED " + (e.stack || e)));
+  let { E, p } = await run({}); p.catch(e => errors.push("SCRIPT " + e.stack)); await wait(250);
+  let w = E.getDom().window, d = w.document;
+  const tap = sel => { const el = typeof sel === "string" ? d.querySelector(sel) : sel; if (!el) throw new Error("no element " + sel); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true })); };
+  E.kc["STOCKIT_ANTHROPIC_KEY"] = "sk-ant-api03-ABCDEFGHIJKLMNOP1234";
+  tap('[data-act="addopen"]'); await wait(30);
+  d.querySelector("#paste").value = "NVDA 30 @ 96\nAAPL 12 @ 168\nMSFT 4 @ 410\nASML 2 @ 600"; tap('[data-act="paste"]'); await wait(900);
+  tap('[data-act="addto"][data-v="watch"]'); await wait(20);
+  d.querySelector("#paste").value = "JNJ"; tap('[data-act="paste"]'); await wait(600);
+  tap('[data-act="addclose"]'); tap('[data-act="refresh"]'); await wait(1000);
+  const before = E.files["/docs/Stockit/stocks.json"];
+  console.log("A start:", JSON.parse(before).map(x => x.s + ":" + x.list + ":" + (x.sh || 0)).join(" "));
+  // the intro: a big button that shrinks into the icon (run again so the page starts with owned stocks)
+  E.finish(); await p;
+  ({ E, p } = await run({ files: E.files, kc: E.kc })); await wait(300); w = E.getDom().window; d = w.document;
+  console.log("  intro: big", !!d.querySelector(".ck-big"), "| icon", !!d.querySelector(".sum .ck-icon"), "| count saved:", JSON.parse(E.files["/docs/Stockit/settings.json"]).checkIntro);
+  await wait(6300);
+  console.log("  after 6 s: big shrinking", !!d.querySelector(".ck-big.shrink"), "| icon pings", !!d.querySelector(".ck-icon.ping"));
+  await wait(1800);
+  console.log("  then: big gone", !d.querySelector(".ck-big"), "| icon stays", !!d.querySelector(".sum .ck-icon"));
+  tap(".sum .ck-icon"); await wait(30);
+  const cs0 = d.querySelector("#checksheet");
+  console.log("  sheet:", cs0.classList.contains("open"), "|", cs0.querySelector(".primary.block").textContent, "disabled:", cs0.querySelector(".primary.block").disabled);
+  tap('#checksheet [data-act="checkpick"]'); await wait(80); tap('#checksheet [data-act="checkpick"]'); await wait(80);
+  console.log("  thumbnails:", d.querySelectorAll("#checksheet .ck-shot img").length, "| button:", d.querySelector("#checksheet .primary.block").textContent);
+  tap('#checksheet [data-act="checkdrop"][data-v="1"]'); await wait(60);
+  console.log("  after removing one:", d.querySelectorAll("#checksheet .ck-shot img").length);
+  { const orig = w.recv; w.recv = st => { w.__lastSt = st; orig(st); }; }
+  const progs = []; { const o2 = w.onCheckProgress; w.onCheckProgress = (pp, l) => { progs.push(Math.round(pp * 100) + "% " + l); o2(pp, l); }; }
+  tap('#checksheet [data-act="checkrun"]'); await wait(10);
+  console.log("  progress bar shown:", !!d.querySelector("#checksheet .ck-prog"), "| scanning thumbs:", d.querySelectorAll("#checksheet .ck-shot.scan").length);
+  await wait(1500);
+  console.log("  progress steps:", progs.slice(0, 4).join(" → "), "…", progs.slice(-1)[0]);
+  require("fs").writeFileSync(require("path").join(require("os").tmpdir(), "stockit-check.json"), JSON.stringify(w.__lastSt.check));
+  const cs = d.querySelector("#checksheet");
+  console.log("B summary:", cs.querySelector(".ck-res").textContent.replace(/\s+/g, " ").trim());
+  console.log("  cards in order:", [...cs.querySelectorAll(".ck")].map(c => c.querySelector(".ck-h b").textContent + " [" + c.querySelector(".ck-b").textContent + "]").join(" · "));
+  console.log("  all open, no collapsed lists:", !cs.querySelector("details"), "| result thumbnails:", cs.querySelectorAll(".ck-shot img").length);
+  console.log("  nothing changed yet:", E.files["/docs/Stockit/stocks.json"] === before, "| images sent:", JSON.stringify(E.log.checkBody.messages[0].content).split('"type":"image"').length - 1);
+  const card = sym => [...d.querySelectorAll("#checksheet .ck")].find(c => c.querySelector(".ck-h b").textContent === sym);
+  console.log("C AAPL fields:", [...card("AAPL").querySelectorAll(".ck-in")].map(i => i.dataset.f + "=" + i.value).join(" "), "| MSFT:", card("MSFT").className, card("MSFT").querySelector(".ck-what").textContent.slice(0, 70));
+  console.log("  KO converted:", [...card("KO").querySelectorAll(".ck-in")].map(i => i.dataset.f + "=" + i.value).join(" "), (card("KO").querySelector(".note") || {}).textContent);
+  // edit AAPL's share count, then apply
+  const shIn = card("AAPL").querySelector('.ck-in[data-f="sh"]'); shIn.value = "15.5"; shIn.dispatchEvent(new w.Event("input", { bubbles: true }));
+  tap(card("AAPL").querySelector('[data-k="update"]')); await wait(100);
+  tap(card("KO").querySelector('[data-k="add"]')); await wait(500);
+  tap(card("JNJ").querySelector('[data-k="own"]')); await wait(100);
+  tap(card("ASML").querySelector('[data-k="remove"]')); await wait(20);
+  console.log("D remove armed:", card("ASML").querySelector('[data-k="remove"]').textContent);
+  tap(card("ASML").querySelector('[data-k="remove"]')); await wait(100);
+  tap(card("MSFT").querySelector('[data-k="ignore"]')); await wait(100);
+  console.log("  done marks:", [...d.querySelectorAll("#checksheet .ck.done .ck-b")].map(e => e.textContent).join(" | "));
+  console.log("  stocks now:", JSON.parse(E.files["/docs/Stockit/stocks.json"]).map(x => x.s + ":" + x.list + ":" + (x.sh || 0) + "@" + (x.cost || 0)).join(" "));
+  console.log("  summary:", d.querySelector("#checksheet .ck-res .sum-v").textContent, "| unknown:", (card("ZZZQ") || {}).textContent && card("ZZZQ").querySelector(".ck-what").textContent);
+  E.finish(); await p;
+  console.log("ERRORS:", errors.length ? errors.join("\n") : "none", "| JS errors:", E.log.jsErrors || "none", "| console.error:", E.log.consoleErrors || "none");
+  process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });

@@ -1,0 +1,27 @@
+const { run } = require("../harness");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+(async () => {
+  const errors = []; process.on("unhandledRejection", e => errors.push("UNHANDLED " + (e.stack || e)));
+  let { E, p } = await run({ speech: true, consent: true, block: true }); p.catch(e => errors.push("SCRIPT " + e.stack)); await wait(250);
+  let w = E.getDom().window, d = w.document;
+  const tap = sel => { const el = typeof sel === "string" ? d.querySelector(sel) : sel; if (!el) throw new Error("no element " + sel); el.dispatchEvent(new w.MouseEvent("click", { bubbles: true })); };
+  E.kc["STOCKIT_ANTHROPIC_KEY"] = "sk-ant-api03-ABCDEFGHIJKLMNOP1234";
+  tap('[data-act="addopen"]'); await wait(30);
+  d.querySelector("#paste").value = "NVDA 30 @ 96\nAAPL 12 @ 168"; tap('[data-act="paste"]'); await wait(900);
+  tap('[data-act="addclose"]'); tap('[data-act="refresh"]'); await wait(1200);
+  tap('[data-act="tab"][data-v="flash"]'); await wait(80);
+  console.log("A tap target:", d.querySelector("#c-fl-NVDA .fl-s").dataset.act, "| details link:", !!d.querySelector('#c-fl-NVDA [data-act="open"]'));
+  tap("#c-fl-NVDA .fl-s"); await wait(20);
+  console.log("  player:", d.querySelector("#plSub").textContent, "| card busy:", !!d.querySelector("#c-fl-NVDA .fl-spk.busy"));
+  await wait(1800);
+  const pr = E.log.digestPrompt || "";
+  console.log("B consent posts:", (E.log.consentPosts || []).length, "| body:", (E.log.consentPosts || [""])[0], "| cookie kept:", JSON.parse(E.files["/docs/Stockit/settings.json"]).yahooCookie);
+  console.log("  prompt: full-text articles", (pr.match(/Full text:/g) || []).length, "| headline-only", (pr.match(/Only the headline/g) || []).length, "| other headlines:", /Other recent headlines/.test(pr), "| chars", pr.length);
+  const tl = JSON.parse(E.files["/docs/Stockit/tldrs.json"]), dgst = Object.values(tl).find(x => x.sources);
+  console.log("  digest sources:", dgst.sources.map(s => (s.read ? "✓" : "✗") + " " + s.t.slice(0, 40)).join(" | "), "| read", dgst.read, "tried", dgst.tried);
+  console.log("C story panel:", (d.querySelector("#c-fl-NVDA .fl-story summary") || {}).textContent, "| spoken:", (E.log.webSpoken || []).length);
+  tap("#c-fl-NVDA .fl-story summary"); await wait(30);
+  E.finish(); await p;
+  console.log("ERRORS:", errors.length ? errors.join("\n") : "none", "| JS errors:", E.log.jsErrors || "none", "| console.error:", E.log.consoleErrors || "none");
+  process.exit(0);
+})().catch(e => { console.log("CRASH", e.stack); process.exit(1); });
