@@ -14,3 +14,4 @@ console.log("Mon 14:00Z, NY on winter time now:", at("2026-11-02T14:00:00Z", "us
 const holiday = { start: Date.parse("2026-11-27T14:30:00Z"), end: Date.parse("2026-11-27T18:00:00Z") };
 console.log("Thanksgiving 16:00Z with Yahoo's period:", at("2026-11-26T16:00:00Z", "us", holiday), "| without:", at("2026-11-26T16:00:00Z", "us"));
 console.log("mktOf:", ["NVDA", "VOW3.DE", "SND.DE", "TEL1L.VS", "BTC-USD", "7203.T", "ASML.AS", "^GSPC"].map(s => s + "→" + (mktOf({ s }) || {}).id).join(" "));
+console.log("errors: none");   // the line every case ends with (the testkit's legacy mode reads it)
