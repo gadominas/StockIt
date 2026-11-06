@@ -208,9 +208,8 @@ function makeEnv(opts = {}) {
   const presented = new Promise(r => resolvePresent = r);
   class WebView {
     async loadHTML(html) {
-      const hook = 'location.href = "stockit://a?d=" + encodeURIComponent(JSON.stringify(m));';
+      const hook = 'window.__hostBridge(url)';   // portable-bridge recipe: the page hands bridge URLs to __hostBridge when it exists
       if (!html.includes(hook)) { if (/stockit:\/\//.test(html) || /clientApp/.test(html)) throw new Error("bridge hook not found"); log.blankFirst = true; dom = new JSDOM(html); return; }   // the empty first window
-      html = html.replace(hook, 'window.__nav("stockit://a?d=" + encodeURIComponent(JSON.stringify(m)));');
       this.html = html;
       dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true, url: "https://local.test/" ,
         beforeParse(w) {
@@ -222,6 +221,7 @@ function makeEnv(opts = {}) {
           w.matchMedia = () => ({ matches: false, addEventListener() {} });
           w.scrollTo = () => {};
           w.__nav = u => { wvRef.shouldAllowRequest({ url: u }); };
+          w.__hostBridge = w.__nav;   // as a native shell does: bridge URLs go straight to shouldAllowRequest
         } });
       const w = dom.window;
       // jsdom can't navigate to custom schemes; intercept location.href assignments made by flush()

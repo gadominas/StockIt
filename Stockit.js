@@ -32,12 +32,14 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.27.1';
+const VERSION = '1.27.2';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
 const UPDATE_SNOOZE_MS = 2 * 24 * 3600 * 1000;   // "Later" = 2 days
 const KC_UPDATE_SNOOZE = 'stockit-update-snooze';   // Keychain key, unique per app
+// In a native shell (BuildIt) new versions come from the App Store or TestFlight, never from GitHub (Step 8).
+const NATIVE_SHELL = (() => { try { return config.runsInNativeShell === true; } catch (e) { return false; } })();
 
 // ── Anonymous usage counts (opt-in), sent to PostHog (app-blueprints · usage-analytics) ──
 // Nothing is sent until KEY is filled in AND the person agrees. Each event carries a random install ID
@@ -53,15 +55,15 @@ const KC_INSTALL = 'stockit-install-id';
 // inventory tools read it without running the script, and Settings › Built with shows it.
 const BLUEPRINTS_REPO = 'https://github.com/gadominas/app-blueprints';
 const BLUEPRINTS = [
-  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.0', since: '1.20.1' },
-  { id: 'in-app-updates', name: 'In-app updates', version: '1.0.1', since: '1.20.1' },
+  { id: 'stability-patterns', name: 'Stability patterns', version: '1.0.1', since: '1.27.2' },
+  { id: 'in-app-updates', name: 'In-app updates', version: '1.1.0', since: '1.27.2' },
   { id: 'settings', name: 'Settings', version: '1.1.2', since: '1.20.1' },
-  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.0', since: '1.0.0' },
-  { id: 'launch-screen', name: 'Launch screen', version: '1.0.0', since: '1.0.0' },
-  { id: 'widgets', name: 'Widgets', version: '1.1.0', since: '1.0.0' },
+  { id: 'ai-configuration', name: 'AI configuration', version: '1.0.1', since: '1.27.2' },
+  { id: 'launch-screen', name: 'Launch screen', version: '1.0.1', since: '1.27.2' },
+  { id: 'widgets', name: 'Widgets', version: '1.1.1', since: '1.27.2' },
   { id: 'ai-invitation', name: 'AI invitation', version: '1.2.1', since: '1.13.3' },
   { id: 'usage-analytics', name: 'Anonymous usage analytics', version: '1.1.0', since: '1.16.0' },
-  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.0', since: '1.19.5' },
+  { id: 'audio-playback', name: 'Sound in silent mode', version: '1.0.1', since: '1.27.2' },
   { id: 'read-aloud', name: 'Read aloud', version: '1.2.3', since: '1.19.5' },
 ];
 
@@ -1914,6 +1916,7 @@ function clearUpdateSnooze() {
   if (Keychain.contains(KC_UPDATE_SNOOZE)) Keychain.remove(KC_UPDATE_SNOOZE);
 }
 async function checkForUpdate(force = false) {
+  if (NATIVE_SHELL) return null;   // Step 8: updates come through the App Store
   if (!force && (settings.checkUpdates === false || updateSnoozed())) return null;
   try {
     const req = new Request(`${REPO_RAW}releases.json?t=${Date.now()}`);
@@ -1939,6 +1942,7 @@ async function checkForUpdate(force = false) {
   }
 }
 async function applyUpdate(info) {
+  if (NATIVE_SHELL) throw new Error('This app is updated through the App Store.');   // Step 8: never download code
   const req = new Request(`${REPO_RAW}${encodeURI((info && info.script) || SCRIPT_FILE)}?t=${Date.now()}`);
   req.timeoutInterval = 30;
   const code = await req.loadString();
@@ -2027,7 +2031,7 @@ function clientState() {
       ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, glanceOpen: settings.glanceOpen !== false, widgetTrend: settings.widgetTrend || "1m", quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
-    lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
+    lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION, nativeShell: NATIVE_SHELL,
     usageAvailable: usageAvailable(), usageStatus: usageStatus(), usageAsk: usageAvailable() && !settings.usageAsked && !settings.shareUsage,
     blueprints: BLUEPRINTS, blueprintsRepo: BLUEPRINTS_REPO, appName: APP,
   };
@@ -2577,7 +2581,8 @@ function clientApp() {
     const m = q.shift();
     if (!m) { flushing = false; return; }
     flushing = true;
-    location.href = "stockit://a?d=" + encodeURIComponent(JSON.stringify(m));
+    const url = "stockit://a?d=" + encodeURIComponent(JSON.stringify(m));
+    if (window.__hostBridge) window.__hostBridge(url); else window.location.href = url;   // portable-bridge recipe
     setTimeout(flush, 80);
   }
 
@@ -3636,8 +3641,10 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Share anonymous usage</b><small class="muted">Counts like app opens and the briefings and stories made, with a random install ID. Never your stocks, amounts, strategies or screenshots. Off removes the ID.</small></div><button class="switch ${S.settings.shareUsage ? "on" : ""}" data-act="toggle" data-v="shareUsage" aria-label="Share anonymous usage"></button></div>
       <div class="srow"><div class="grow"><b>Test the connection</b><small id="usagemsg" class="muted" aria-live="polite">${esc(S.usageStatus || "Sends one test event now and shows PostHog’s answer.")}</small></div><button class="sm" data-act="usage-test">Send test</button></div>` : ""}
       <h3 class="sec">Updates</h3>
-      <div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have Stockit ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
-      <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>
+      ${S.nativeShell
+        ? `<div class="srow"><div class="grow"><b>Updates</b><small class="muted">You have Stockit ${esc(S.version)}. New versions come through the App Store (or TestFlight).</small></div></div>`
+        : `<div class="srow"><div class="grow"><b>Offer new versions</b><small class="muted">You have Stockit ${esc(S.version)}. “Later” waits two days.</small></div><button class="switch ${S.settings.checkUpdates ? "on" : ""}" data-act="toggle" data-v="checkUpdates" aria-label="Offer new versions"></button></div>
+      <div class="srow"><div class="grow"><b>Check for updates now</b><small id="updmsg" class="muted" aria-live="polite"></small></div><button class="sm" data-act="updcheck">Check</button></div>`}
       <div class="srow"><div class="grow"><b>Start-up log</b><small class="muted">What happened the last times Stockit opened</small></div><button class="sm" data-act="startlog">Show</button></div>
       <pre id="startlog" class="startlog" hidden></pre>
       ${S.cfgSchema.map(sec => `<h3 class="sec">${esc(sec.title)}</h3>${sec.items.filter(d2 => d2.k !== "ideaThemes").map(field).join("")}${sec.items.some(d2 => d2.k === "ideaThemes") ? `<p class="note">Themes for ideas are in the <button class="link small" data-act="gotab" data-v="ideas">Ideas tab</button>.</p>` : ""}`).join("")}
