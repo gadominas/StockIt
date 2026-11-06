@@ -30,7 +30,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.22.0';
+const VERSION = '1.23.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -275,7 +275,7 @@ const write = (n, v) => {
 
 // Defaults first, saved choices on top. Loaded here, before the app and widget branches.
 const settings = Object.assign(
-  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, insiders: true, checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
+  { tab: "own", sort: "value", range: "1y", addTo: "watch", flashFold: {}, ideasFold: {}, insiders: true, widgetTrend: "1m",   // widgetTrend: the longer change beside each widget ticker (1w, 2w, 1m, 3m, off) checkIntro: 0, aiStrat: true, privacy: false, briefSeen: 0,   // briefSeen: the briefing you've moved on from, shown folded   // privacy: your amounts hidden, for showing the app to someone   // aiStrat: suggested strategies refresh on their own    // remembered picks; flashFold: symbol → newest headline time when folded
     refreshOnOpen: true, widgetMoney: false, homeCur: "auto",   // homeCur: the currency your money is shown in (auto: your biggest holdings')                                    // Portfolio
     newsYahoo: true, newsWeb: true, crowd: true,                                // News and signals
     style: "balanced",                                                          // AI advice: cautious, balanced, adventurous
@@ -1906,7 +1906,7 @@ function clientState() {
       theme: settings.theme, density: settings.density, font: settings.font, textSize: settings.textSize,
       speechEngine: settings.speechEngine || "device", voiceURI: settings.voiceURI || "", voiceRate: settings.voiceRate || 1, voicePitch: settings.voicePitch || 1,
       voiceGender: settings.voiceGender || "all", ttsModel: settings.ttsModel || "gpt-4o-mini-tts", ttsVoice: settings.ttsVoice || "coral",
-      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
+      ttsInstructions: settings.ttsInstructions || "", hasOpenAI: !!keyFor("openai"), shareUsage: !!settings.shareUsage, openInReader: settings.openInReader !== false, readerProxy: settings.readerProxy !== false, insiders: settings.insiders !== false, widgetTrend: settings.widgetTrend || "1m", quiverErr: settings.quiverErr || "", flashFold: settings.flashFold || {}, ideasFold: settings.ideasFold || {}, checkIntro: settings.checkIntro || 0, aiStrat: settings.aiStrat !== false, privacy: !!settings.privacy, briefSeen: settings.briefSeen || 0,
     },
     ttsModels: settings.ttsModels || null,
     lastRefresh: settings.lastRefresh, palettes: PALETTES, version: VERSION,
@@ -2025,10 +2025,11 @@ async function handle(m) {
       if (m.k === "flashFold" && m.v && typeof m.v === "object" && !Array.isArray(m.v))   // folded Flash cards, kept for stocks you follow
         settings.flashFold = Object.fromEntries(Object.entries(m.v).filter(([s, t]) => stocks.some(x => x.s === s) && isFinite(t)));
       if (m.k === "homeCur" && (m.v === "auto" || HOME_CURS.includes(m.v))) settings.homeCur = m.v;
+      if (m.k === "widgetTrend") settings.widgetTrend = ["1w", "2w", "1m", "3m", "off"].includes(m.v) ? m.v : "1m";
       if (m.k === "checkIntro" && isFinite(m.v)) settings.checkIntro = Math.max(0, Math.min(99, +m.v));
       write("settings", settings);
       if (m.k === "homeCur") { await loadFx().catch(() => {}); push(); }
-      if (m.k === "widgetMoney" || m.k === "homeCur" || m.k === "privacy") saveWidget(widgetSnapshot());
+      if (m.k === "widgetMoney" || m.k === "homeCur" || m.k === "privacy" || m.k === "widgetTrend") saveWidget(widgetSnapshot());
       return;
     case "cfg": {
       if (m.k === "*") settings.cfg = {}; else setCfg(m.k, m.v);
@@ -3321,6 +3322,8 @@ function clientApp() {
       <div class="srow"><div class="grow"><b>Show your money in</b><small class="muted">Portfolio value, today and gains, here and in the widget. Stocks in other currencies are converted at today's rate. ${S.fx && S.fx.choice === "auto" ? `Auto uses the currency most of your money is in (now ${esc(HOME())}).` : ""}</small></div>
         <select id="homeCur" class="cursel" aria-label="Currency">${[["auto", "Auto"]].concat(((S.fx && S.fx.curs) || []).map(c2 => [c2, c2])).map(([v, l]) => `<option value="${v}" ${(S.fx && S.fx.choice) === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${sw("widgetMoney", "Show portfolio value in the widget", "Off: the widget shows only percentages, never amounts")}
+      <div class="lk-row"><span class="lk-l">Beside each widget ticker</span><div class="seg wide">${[["1w", "1 week"], ["2w", "2 weeks"], ["1m", "1 month"], ["3m", "3 months"], ["off", "Off"]].map(([v, l]) => `<button class="${(S.settings.widgetTrend || "1m") === v ? "on" : ""}" data-act="wtrend" data-v="${v}">${l}</button>`).join("")}</div>
+        <small class="muted">The change over this time, small, next to today's change. The widget shows it at its next refresh.</small></div>
       ${widgetPicksHTML()}
       <h3 class="sec">News and signals</h3>
       ${sw("newsYahoo", "Yahoo Finance headlines", "Business news about each stock")}
@@ -4264,6 +4267,7 @@ function clientApp() {
     switch (act) {
       case "tab": arrange = false; if (tab === "own" && v !== "own" && S.briefing && S.settings.briefSeen !== S.briefing.at) { S.settings.briefSeen = S.briefing.at; send("set", { k: "briefSeen", v: S.briefing.at }); } if (v !== "own") { briefFold = null; briefFull = false; } tab = v; if (v !== "ideas") send("set", { k: "tab", v }); else if (S.settings.hasKey) send("stratdue", {}); render(); window.scrollTo(0, 0); break;
       case "sort": sort = v; send("set", { k: "sort", v }); render(); break;
+      case "wtrend": S.settings.widgetTrend = v; send("set", { k: "widgetTrend", v }); renderCfg(); break;
       case "arrange": if (v === "1") startArrange(); else { arrange = false; render(); } break;
       case "mark": { const y = byS(v), k = t.dataset.k; if (!y) break; y[k] = !y[k]; send("mark", { s: v, k, v: y[k] }); if (openSym) renderDetail(); render(); window.toast(k === "pin" ? (y[k] ? `${v} pinned to the top` : `${v} unpinned`) : k === "wpin" ? (y[k] ? `${v} is on the widget` : `${v} left the widget`) : (y[k] ? `${v} highlighted` : `${v} highlight removed`)); break; }
       case "refresh": if (!progress) send("refresh", { force: true }); break;
@@ -5198,11 +5202,21 @@ window.__boot = function (st) {
 // ---------- home-screen widget: Stockit's content for the shared frame below ----------
 // The snapshot the widget reads (saveWidget): the day's move, biggest movers, the ✦ briefing headline, and the
 // portfolio value only when "Show portfolio value in the widget" is on. Saved after refreshes, edits and new AI text.
+// The longer change shown beside each widget ticker: since the close about this many calendar days ago
+const WTREND = { "1w": [7, "1W"], "2w": [14, "2W"], "1m": [30, "1M"], "3m": [91, "3M"], off: null };
+function changeOver(m, t) {
+  const p = (m && m.pts) || [];
+  if (!t || p.length < 2) return null;
+  const price = m.price != null ? m.price : p[p.length - 1][1], lastDay = p[p.length - 1][0];
+  let v = null;
+  for (const [d, c] of p) { if (d <= lastDay - t[0]) v = c; else break; }
+  return v ? (price / v - 1) * 100 : null;
+}
 function widgetSnapshot(pricesAt) {
   const tot = totals()[0] || null;
   const all = stocks.map(x => {
     const m = market[x.s] || {}, sg = sigFor(x.s);
-    return { s: x.s, own: x.list === "own", chg: dayPct(m), price: m.price, cur: m.cur || "", sig: sg ? sg.signal : "", wpin: !!x.wpin };
+    return { s: x.s, own: x.list === "own", chg: dayPct(m), price: m.price, cur: m.cur || "", sig: sg ? sg.signal : "", wpin: !!x.wpin, tr: changeOver(m, WTREND[settings.widgetTrend || "1m"]) };
   });
   const rows = all.filter(r => r.chg != null);
   const own = rows.filter(r => r.own), base = own.length ? own : rows;
@@ -5216,6 +5230,7 @@ function widgetSnapshot(pricesAt) {
     value: tot && settings.widgetMoney && !settings.privacy ? { v: tot.value, day: tot.day, cur: tot.cur } : null,   // privacy mode hides it here too
     movers: (pinned.length ? pinned : best).slice(0, 8),
     pick: pinned.length ? "pinned" : own.length ? "best-own" : "best-watch",
+    trendLabel: (WTREND[settings.widgetTrend || "1m"] || [])[1] || "",
     private: !!settings.privacy,   // privacy mode (the eye, or a Back Tap shortcut): amounts hidden on the widget too
     headline: b && Date.now() - b.at < 48 * 3600e3 ? b.headline : "",
     prices: pricesAt || settings.lastRefresh || 0,
@@ -5247,11 +5262,12 @@ async function widgetModel(param, family) {
   const hide = d.private || /priv|hide|mask/i.test(String(param || ""));
   const cells = (d.movers || []).map(r => ({ s: r.s.replace(/\.(DE|F|L|PA|AS|MI|TO|V|SW|ST|OL|CO|HE|VI|BR|MC|LS|T|HK|AX)$/, "").slice(0, 8),
     pct: wPct(r.chg), tone: tone(r.chg), price: r.price != null ? (MINOR[r.cur] ? r.price.toFixed(2) + "p" : wMoney(r.price, r.cur)) : "",
-    sig: r.sig ? r.sig[0].toUpperCase() + r.sig.slice(1) : "" }));
+    sig: r.sig ? r.sig[0].toUpperCase() + r.sig.slice(1) : "", tr: r.tr != null && d.trendLabel ? wPct(r.tr) : "", trTone: tone(r.tr) }));
   const kicker = d.scope === "own" ? "Your portfolio today" : "Your watchlist today";
-  const footer = d.prices ? "Prices " + wWhen(d.prices) : "";
+  let footer = d.prices ? "Prices " + wWhen(d.prices) : "";
   const accessory = { glyph: d.dayPct >= 0 ? "▲" : "▼", inline: `${d.dayPct >= 0 ? "▲" : "▼"} ${wPct(d.dayPct)} today`, value: d.dayPct == null ? "–" : (d.dayPct >= 0 ? "+" : "") + d.dayPct.toFixed(1) };
-  const pickNote = d.pick === "pinned" ? "Your widget stocks" : d.pick === "best-own" ? "Best today" : "Best on your watchlist";
+  const pickNote = (d.pick === "pinned" ? "Your widget stocks" : d.pick === "best-own" ? "Best today" : "Best on your watchlist") + (d.trendLabel ? ` · ${d.trendLabel} and today` : "");
+  if (d.trendLabel && cells.some(c => c.tr)) footer += `  ·  small: ${({ "1W": "1 week", "2W": "2 weeks", "1M": "1 month", "3M": "3 months" })[d.trendLabel]}`;
   const headline = d.headline && family === "large" ? d.headline : "";
   if (d.value && !hide) {
     return { badge: wPct(d.dayPct), badgeTone: tone(d.dayPct), kicker, value: wMoney(d.value.v, d.value.cur, true),
@@ -5454,6 +5470,7 @@ function wCell(stack, c, o) {
   if (o.width) row.size = new Size(o.width, o.h || 0);
   wText(row, c.s, o.size, 'semi', 'ink');
   if (o.price && c.price) { row.addSpacer(6); wText(row, c.price, o.size - 1.5, 'reg', 'muted'); }
+  if (c.tr) { row.addSpacer(o.price ? 8 : 5); wText(row, c.tr, o.size - 2, 'reg', c.trTone); }   // the longer change, smaller
   row.addSpacer();
   if (o.sig && c.sig) { wText(row, '✦ ' + c.sig, o.size - 1.5, 'reg', 'muted'); row.addSpacer(8); }
   wText(row, c.pct, o.size, 'semi', c.tone);

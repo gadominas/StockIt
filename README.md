@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.22.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.23.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -349,7 +349,7 @@ Choose the voice in **Settings › Listening**:
 
 **Which stocks it shows.** Pin up to 8 stocks to the widget, from your portfolio or your watchlist: tap **▦** in **Arrange** (next to the stock count, or long-press a stock), or **▦ Show on the widget** on a stock's page. Pinned stocks show in your own order. With nothing pinned, the widget shows your best performers today from your portfolio, or from your watchlist if you own nothing yet. **Settings › Portfolio › Stocks on the widget** lists the pinned ones; tap one to take it off.
 
-**Compact.** The medium widget fits 8 tickers in two columns under one summary line; the small one 4; the large one 8 with their price and ✦ view, under today's move and the ✦ briefing headline.
+**Compact.** The medium widget fits 8 tickers in two columns under one summary line; the small one 4; the large one 8 with their price and ✦ view, under today's move and the ✦ briefing headline. Beside each ticker, in smaller type, is its change over the last month (or 1 week, 2 weeks, 3 months, or nothing: **Settings › Portfolio › Beside each widget ticker**); today's change stays on the right.
 
 **Amounts.** The widget shows percentages only, never amounts of money, unless you turn on **Settings › Portfolio › Show portfolio value in the widget**. Privacy mode (the eye) hides them on the widget too.
 
