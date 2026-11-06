@@ -31,7 +31,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.24.1';
+const VERSION = '1.25.0';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -2358,6 +2358,7 @@ function clientApp() {
   let tab = S.settings.tab || "own", sort = S.settings.sort || "value", range = S.settings.range || "1y", addTo = S.settings.addTo || "watch";
   let openSym = null, addOpen = false, cfgOpen = false, cfgArmed = false, aiOpen = false, aiArmed = null, rmArmed = null, secArmed = null;
   let newsOpen = null; const tl = {};
+  let detailOver = false;   // a stock page opened from the reader sits above it
   let arrange = false;   // Arrange mode on the Portfolio or Watchlist tab
   let previewWait = null, themeText = "", ideaExplain = null, checkOpen = false, ckArmed = null, ckProg = null, ckShown = 0, ckTimer = null; const ckEdit = {};
   let introState = null;   // "big" on the first launches, then "shrunk" a few seconds later
@@ -3193,6 +3194,8 @@ function clientApp() {
     const el = $("#detail"), keep = el.scrollTop;
     const x = openSym && byS(openSym);
     el.classList.toggle("open", !!x || (!!openSym && previewWait === openSym)); lockBody();
+    if (!openSym) detailOver = false;
+    el.classList.toggle("over", detailOver);
     if (!x && openSym && previewWait === openSym) {   // a stock from Ideas, still loading
       el.innerHTML = `<div class="sh-head"><h2>${esc(openSym)}</h2><button class="link" data-act="close">Done</button></div><div class="sh-body"><div class="booting" role="status"><span class="busy-dot"></span>Loading ${esc(openSym)}…</div></div>`;
       return;
@@ -4078,12 +4081,31 @@ function clientApp() {
     }
     el.innerHTML = (d.image ? `<img class="rd-img" src="${esc(d.image)}" alt="" loading="lazy" onerror="this.remove()">` : "") + rdBlocks(d.blocks || [], "b");
   }
+  // Tickers quoted in an article ("NASDAQ:NRIX", "(NYSE: LLY)", "$TSLA") become links to that stock's page,
+  // written the way Yahoo Finance writes it (LSE:BARC → BARC.L, XETRA:SAP → SAP.DE, NYSE:BRK.B → BRK-B).
+  const XSUF = { NYSE: "", NASDAQ: "", NYSEARCA: "", NYSEAMERICAN: "", AMEX: "", OTC: "", OTCMKTS: "", CBOE: "", BATS: "", TSX: ".TO", TSXV: ".V", CSE: ".CN",
+    LSE: ".L", LON: ".L", XETRA: ".DE", ETR: ".DE", FRA: ".F", FWB: ".F", EPA: ".PA", AMS: ".AS", EBR: ".BR", BIT: ".MI", BME: ".MC", SWX: ".SW", SIX: ".SW",
+    STO: ".ST", OSL: ".OL", CPH: ".CO", HEL: ".HE", ASX: ".AX", HKEX: ".HK", HKG: ".HK", TYO: ".T", KRX: ".KS", NSE: ".NS", BSE: ".BO" };
+  const TK_RX = /\b(NYSE ?(?:ARCA|Arca|AMERICAN|American)|NYSE|NASDAQ|Nasdaq|AMEX|OTCMKTS|OTC|CBOE|BATS|TSXV|TSX|CSE|LSE|LON|XETRA|Xetra|ETR|FRA|FWB|EPA|AMS|EBR|BIT|BME|SWX|SIX|STO|OSL|CPH|HEL|ASX|HKEX|HKG|TYO|KRX|NSE|BSE)\s?:\s?([A-Z0-9][A-Z0-9.\-]{0,9})(?![A-Za-z0-9])/g;   // tickers in capitals only
+  function tickSym(ex, t) {
+    const suf = XSUF[ex.toUpperCase().replace(/\s+/g, "")];
+    if (suf == null) return null;
+    t = t.toUpperCase().replace(/[.\-]$/, "");
+    if (/\.(HK)$/.test(suf) && /^\d+$/.test(t)) t = t.padStart(4, "0");
+    return suf ? t.replace(/\./g, "-") + suf : t.replace(/\./g, "-");
+  }
+  function tickLinks(h) {   // on escaped text
+    const link = (sym, label) => `<span class="tk" role="link" tabindex="0" data-act="preview" data-v="${esc(sym)}">${label}</span>`;
+    return String(h)
+      .replace(TK_RX, (m, ex, t) => { const sym = tickSym(ex, t); return sym ? link(sym, m) : m; })
+      .replace(/(^|[\s(])\$([A-Z]{1,5})(?![A-Za-z0-9.,]*\d)(?![A-Za-z0-9])/g, (m, pre, t) => pre + link(t, "$" + t));
+  }
   function rdBlocks(blocks, pre) {   // while this article is read, its sentences are spans that highlight and dim
     const reading = rdReading();
     let html = "", list = false;
     blocks.forEach((b, i) => {
       const plain = esc(b.text);
-      const txt = b.t === "pre" ? plain : reading ? (segSpans(sg => sg.k === 0 && sg.key === pre + i) || plain) : plain;
+      const txt = b.t === "pre" ? plain : reading ? (segSpans(sg => sg.k === 0 && sg.key === pre + i) || plain) : tickLinks(plain);
       if (b.t === "li" && !list) { html += "<ul class=\"rd-ul\">"; list = true; }
       if (b.t !== "li" && list) { html += "</ul>"; list = false; }
       html += b.t === "h" ? `<h2 class="rd-h">${txt}</h2>` : b.t === "pre" ? `<pre class="rd-pre">${txt}</pre>` : b.t === "q" ? `<blockquote class="rd-q">${txt}</blockquote>` : b.t === "li" ? `<li>${txt}</li>` : `<p class="rd-p">${txt}</p>`;
@@ -4421,7 +4443,7 @@ function clientApp() {
       case "checkfind": checkOpen = false; renderCheck(); addOpen = true; results = null; renderAdd(); { const q = $("#q"); if (q) { q.value = v; } } break;
       case "ideaexplain": ideaExplain = ideaExplain === v ? null : v; render(); break;
       case "gotab": cfgOpen = false; renderCfg(); tab = v; send("set", { k: "tab", v }); render(); window.scrollTo(0, 0); break;
-      case "preview": openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
+      case "preview": detailOver = !!rdId; openSym = v; previewWait = byS(v) ? null : v; explainKey = null; rmArmed = null; renderDetail(); send("preview", { s: v }); $("#detail").scrollTop = 0; break;
       case "addpreview": send("addpreview", { s: t.dataset.s, v }); previewWait = null; break;
       case "themeadd": {
         const tx = themeText.trim().slice(0, 120);
@@ -4743,7 +4765,10 @@ html[data-font=serif] .ra-p{font-family:var(--serif)}
 /* Reduce Motion: no bouncing bars, no sliding bar, no fading highlight */
 @media (prefers-reduced-motion: reduce){.rs{transition:none}.pl-prog i{transition:none}.eq i{animation:none;height:60%}}
 /* The reader (read-aloud 1.1.0): from snippets/read-aloud/reader.css */
-#reader{z-index:16}   /* Stockit: above the news sheet (12) it opens from */
+#reader{z-index:16}
+#detail.over{z-index:17}   /* a stock opened from a ticker in the reader */
+.tk{color:var(--signal);font-weight:600;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;cursor:pointer;border-radius:3px}
+.tk:active{background:var(--signal-wash)}   /* Stockit: above the news sheet (12) it opens from */
 .rd-head{gap:12px}
 .rd-src{font-weight:700;color:var(--ink-2);font-size:calc(14px * var(--ts));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .rd-body{max-width:680px;margin:0 auto;padding:18px 20px 160px}

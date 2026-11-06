@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.24.1-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.25.0-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -323,6 +323,7 @@ Tap a headline to open its **TL;DR**:
 - **✦ AI summary** when you have a key, labelled with the provider. Without a key, Stockit picks the key sentences from the article itself, labelled **no AI**.
 - **Listen to TL;DR** reads the summary aloud, highlighting each sentence as it goes; **Article** reads the whole original article (it starts speaking at once, and falls back to the summary if the page can't be read).
 - **Read the full article** opens it in Stockit's **reader**: the article's own text with its picture, author and reading time, **Listen** (the text lights up as it's read), and **✦ Ask AI** with suggested questions ("What's the main point?"). When a site asks for consent or a sign-in first, the reader says so and offers the original; **Original ↗** opens it at the publisher. To open articles in Safari instead, switch off **Settings › News and signals › Open articles in the reader**.
+- **Tickers in an article are links.** *NASDAQ:NRIX*, *(NYSE: LLY)*, *LSE:BARC* or *$TSLA* open that stock's page above the article, with its chart, numbers and news, and **Add to watchlist** or **I own this**; close it to carry on reading. Tickers from other exchanges are opened the Yahoo Finance way (LSE:BARC → BARC.L, XETRA:SAP → SAP.DE).
 - **More about** the same stock is listed underneath, one tap away.
 
 Google News links are followed to the publisher's own article. Some articles still can't be read from the phone (paywalls, cookie walls, pages that need JavaScript). The TL;DR then explains only the headline and summary, and says so. TL;DRs are kept on your phone, so opening one again is instant.
