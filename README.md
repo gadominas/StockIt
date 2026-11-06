@@ -10,7 +10,7 @@ Your stocks, the news around them and a plain-English story of what's going on.<
 
 An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
 
-[![Version](https://img.shields.io/badge/version-1.24.0-1d4ed8)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.24.1-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
 [![AI](https://img.shields.io/badge/AI-Claude%20or%20OpenAI%2C%20optional-8b5cf6)](#ai-on-your-terms)
 [![Not financial advice](https://img.shields.io/badge/not-financial%20advice-b91c1c)](#not-financial-advice)
@@ -226,7 +226,8 @@ If you own stocks on several markets, Stockit adds them all up in one currency. 
 
 - **Portfolio value, today and since you bought** are in that currency, here and in the widget (when **Show portfolio value in the widget** is on).
 - Each stock's page shows its value, today and gain in your currency, with the stock's own currency underneath. Its price stays in the currency it trades in.
-- Exchange rates come from Yahoo Finance with your prices. Today's change includes the currency's own move since yesterday; what you paid is converted at today's rate.
+- Exchange rates come from Yahoo Finance with your prices. Today's change includes the currency's own move since yesterday.
+- **What you paid, in the currency you paid in.** When you bought a foreign stock with euros, enter its average price in euros (**Edit shares**, then the price's currency). Your gain then includes the currency's move since you bought, exactly as your broker counts it. An average price in the stock's own currency is converted at today's rate, which leaves the currency's move out: a Canadian stock bought when the Canadian dollar was weaker shows less gain than your broker does. **Check my portfolio** suggests the euro price from your broker's value and gain.
 - London prices quoted in pence are converted to pounds first.
 
 ## Charts you can touch

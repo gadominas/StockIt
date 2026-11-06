@@ -31,7 +31,7 @@
  */
 
 // This build's version. When releasing, bump it and add a matching entry to releases.json.
-const VERSION = '1.24.0';
+const VERSION = '1.24.1';
 const APP_ID = 'stockit';   // unique per app, never changes
 const REPO_RAW = 'https://raw.githubusercontent.com/gadominas/StockIt/main/';
 const SCRIPT_FILE = 'Stockit.js';   // the script's file name in the repository
@@ -1632,7 +1632,10 @@ function fromValue(p, cur, yahooPrice) {
   // Average price from the gain only when value, gain and stock share one currency: brokers count a foreign
   // stock's gain at the exchange rates of the day you bought, which Stockit doesn't know.
   const cost = p.gain != null && same && normCur(gc)[0] === normCur(cur)[0] && sh > 0 ? (p.value - p.gain) / sh * (convertCur(1, vc, cur) || 1) : null;
-  return { sh, raw, exact: sh === near, cost, same, vc, tol };
+  // A foreign stock valued in your currency: (value − gain) ÷ shares is what you paid per share in that currency,
+  // the broker's own cost basis, which counts the currency's move since you bought.
+  const costIn = p.gain != null && !same && normCur(gc)[0] === normCur(vc)[0] && sh > 0 ? (p.value - p.gain) / sh : null;
+  return { sh, raw, exact: sh === near, cost: cost != null ? cost : costIn, costCur: cost != null ? normCur(cur)[0] : costIn != null ? normCur(vc)[0] : null, same, vc, tol };
 }
 async function runCheck() {
   if (checkBusy) return;
@@ -1678,18 +1681,21 @@ JSON: {"broker":null,"total":null,"totalCurrency":null,"positions":[{"symbol":"N
         const m = market[x.s] || {}, cur = m.cur || p.currency || "USD", pc = p.currency || cur;
         const shotPrice = convertCur(p.price, pc, cur), shotCost = convertCur(p.avgPrice, pc, cur);
         const gap = shotPrice != null && m.price ? (shotPrice / m.price - 1) * 100 : null;
-        const dv = fromValue(p, cur, m.price), sh = p.shares != null ? p.shares : dv.sh, cost = shotCost != null ? shotCost : dv.cost;
+        const dv = fromValue(p, cur, m.price), sh = p.shares != null ? p.shares : dv.sh;
+        const costCur = shotCost != null ? normCur(cur)[0] : dv.costCur || normCur(cur)[0], costRaw = shotCost != null ? shotCost : dv.cost;
+        const cost = costRaw != null ? convertCur(costRaw, costCur, cur) : null;   // compared in the stock's currency, at today's rate
+        const myCc = costCurOf(x), myCost = myCc !== normCur(cur)[0] && x.lots ? x.lots[0].cost : x.cost;
         const diffs = [];
         if (x.list !== "own") diffs.push("watch");
         if (sh != null && Math.abs(sh - (x.sh || 0)) / Math.max(sh, x.sh || 0, 1e-9) > (p.shares != null ? 1e-6 : dv.tol)) diffs.push("shares");
-        if (cost != null && (!x.cost || Math.abs(cost / x.cost - 1) * 100 > cTol)) diffs.push("cost");
+        if (cost != null && (!x.cost || Math.abs(cost / x.cost - 1) * 100 > cTol || (costCur !== myCc && Math.abs(cost / x.cost - 1) * 100 > 0.2))) diffs.push("cost");
         if (gap != null && Math.abs(gap) > pTol) diffs.push("price");
         if (p.shares != null && dv.sh != null && Math.abs(dv.raw / p.shares - 1) > 0.02) diffs.push("value");   // shares and value disagree: likely misread
         const mineValue = convertCur((x.sh || 0) * (shotPrice || m.price || 0), cur, dv.vc || cur);
         items.push({ id, kind: x.list !== "own" ? "watch" : diffs.length ? "differs" : "match", s: x.s, name: m.name || x.name || x.s, cur, shot: p, shotCur: pc,
-          mine: { sh: x.sh || 0, cost: x.cost || 0, price: m.price != null ? m.price : null, value: mineValue }, diffs, gap, dv,
+          mine: { sh: x.sh || 0, cost: x.cost || 0, costIn: myCost || 0, costCur: myCc, price: m.price != null ? m.price : null, value: mineValue }, diffs, gap, dv,
           partial: sh == null && cost == null,   // only the price could be compared
-          suggest: { sh: sh != null ? sh : x.sh || 0, cost: cost != null ? round(cost, cost < 10 ? 4 : 2) : x.cost || 0 }, converted: normCur(pc)[0] !== normCur(cur)[0] });
+          suggest: { sh: sh != null ? sh : x.sh || 0, cost: costRaw != null ? round(costRaw, costRaw < 10 ? 4 : 2) : myCost || 0, cur: costRaw != null ? costCur : myCc }, converted: costRaw != null && costCur !== normCur(cur)[0] && shotCost != null });
       } else {
         const r = await resolveSymbol(p.symbol || p.name).catch(() => null);
         let cur = p.currency || "USD", price = null;
@@ -1720,11 +1726,14 @@ async function applyCheck(m) {
   const x = it.s && stocks.find(y => y.s === it.s);
   if (m.k === "update" || m.k === "own") {
     if (!x) return;
-    x.sh = n(m.sh); x.cost = n(m.cost); if (x.sh > 0) x.list = "own";
+    if (x.lots && x.lots.length > 1) { x.sh = n(m.sh); x.cost = n(m.cost); delete x.lots; if (x.sh > 0) x.list = "own"; }
+    else await setHolding(x, n(m.sh), n(m.cost), m.cur);
     it.resolved = m.k === "own" ? "Moved to your portfolio" : "Updated";
   } else if (m.k === "add") {
     if (!it.s) return;
     const r = await addStocks([{ s: it.s, name: it.name, sh: n(m.sh), cost: n(m.cost) }], "own");
+    const y = stocks.find(z => z.s === it.s);
+    if (y && m.cur) await setHolding(y, n(m.sh), n(m.cost), m.cur);
     it.resolved = r.added.length || r.updated.length ? "Added to your portfolio" : "Couldn't add";
   } else if (m.k === "watch") {
     if (!x) return; x.list = "watch"; it.resolved = "Moved to your watchlist";
@@ -1872,7 +1881,7 @@ function clientState() {
   const view = x => {
       const m = market[x.s] || {};
       return {
-        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, lots: x.lots || null, idx: stocks.indexOf(x),
+        s: x.s, name: m.name || x.name || x.s, exch: m.exch || x.exch || "", list: x.list, sh: x.sh || 0, cost: x.cost || 0, pin: !!x.pin, hl: !!x.hl, wpin: !!x.wpin, lots: x.lots || null, costCur: costCurOf(x), idx: stocks.indexOf(x),
         price: m.price, prev: m.prev, cur: m.cur || "", mt: m.mt || 0, tz: m.tz || "", tp: m.tp || null, type: m.type || "", at: m.at || 0, err: m.err || null, pts: m.pts || [],
         st: stats(m), trend: trendOf(m), f: m.f || {}, fAt: m.fAt || 0, prof: m.prof || null, news: m.news || [], newsAt: m.newsAt || 0, crowd: m.crowd || null, ins: m.ins || null,
         sig: sigFor(x.s), bstory: insights.briefing && insights.briefing.stocks && insights.briefing.stocks[x.s] ? insights.briefing.stocks[x.s].story : "",
@@ -1978,19 +1987,18 @@ async function editHolding(x) {
     if (r === -1) return false;
     return editLot(x, r < x.lots.length ? x.lots[r].id : null);
   }
-  if (x.lots && x.lots.length === 1) return editLot(x, x.lots[0].id);
-  const m = market[x.s] || {};
+  const m = market[x.s] || {}, cur0 = normCur(m.cur || "USD")[0], cc = costCurOf(x), one = x.lots && x.lots.length === 1 ? x.lots[0] : null;
   const al = new Alert();
   al.title = `${x.s}: your shares`;
-  al.message = `How many shares you own, and the average price you paid per share${m.cur ? " in " + m.cur : ""}. Leave the price empty if you don't know it.`;
+  al.message = `How many shares you own, and the average price you paid per share, in the currency you paid in. ${x.s} trades in ${cur0}; if you bought it with ${homeCur() !== cur0 ? homeCur() : "another currency"}, enter that price and currency (as your broker shows it), so your gain includes the currency's move too. Leave the price empty if you don't know it.`;
   al.addTextField("Shares", x.sh ? String(x.sh) : "").setDecimalPadKeyboard();
-  al.addTextField(`Average price${m.cur ? " (" + m.cur + ")" : ""}`, x.cost ? String(x.cost) : "").setDecimalPadKeyboard();
+  al.addTextField("Average price paid", one ? String(one.cost || "") : x.cost ? String(x.cost) : "").setDecimalPadKeyboard();
+  al.addTextField(`Currency of that price (${cur0}, ${homeCur() !== cur0 ? homeCur() + ", " : ""}…)`, cc);
   al.addAction("Save");
   al.addCancelAction("Cancel");
   if (await al.present() !== 0) return false;
   const n = v => { const k = parseFloat(String(v || "").replace(",", ".")); return isFinite(k) && k > 0 ? k : 0; };
-  x.sh = n(al.textFieldValue(0)); x.cost = n(al.textFieldValue(1));
-  if (x.sh > 0) x.list = "own";
+  await setHolding(x, n(al.textFieldValue(0)), n(al.textFieldValue(1)), al.textFieldValue(2));
   return true;
 }
 // Positions: one company held in several places — say NKE on the NYSE in dollars, and in Frankfurt in euros when
@@ -2007,6 +2015,23 @@ function syncLots(x) {
   }
   x.sh = round(sh, 6);
   x.cost = known && sh > 0 ? round(cost / sh, 4) : 0;
+}
+// What you paid, in the currency you paid it in. A stock priced in CAD and bought with euros keeps its average
+// price in euros, so its gain includes the currency's move since you bought, as brokers count it. Kept as a single
+// position, which gives the stock its average in CAD at today's rate for everything else.
+function costCurOf(x) {
+  const cur0 = normCur((market[x.s] || {}).cur || "USD")[0];
+  return x.lots && x.lots.length === 1 ? normCur(x.lots[0].cur)[0] : cur0;
+}
+async function setHolding(x, sh, cost, costCur) {
+  const m = market[x.s] || {}, cur0 = normCur(m.cur || "USD")[0], cc = (String(costCur || "").toUpperCase().match(/[A-Z]{3}/) || [cur0])[0];
+  if (cc !== cur0 && cost > 0) {
+    await ensureRate(cc); await ensureRate(cur0);
+    const old = x.lots && x.lots.length === 1 ? x.lots[0] : null;
+    x.lots = [{ id: old ? old.id : "l1", sh, cost, cur: cc, where: old ? old.where : m.exch || "" }];
+    syncLots(x);
+  } else { delete x.lots; x.sh = sh; x.cost = cost; }
+  if (x.sh > 0) x.list = "own";
 }
 async function editLot(x, id) {
   const m = market[x.s] || {}, cur0 = normCur(m.cur || "USD")[0], where0 = m.exch || "";
@@ -3195,7 +3220,8 @@ function clientApp() {
       <div><small>Today</small><b class="${cls(dh != null ? dh : dayPct(x))}">${P(dh != null ? signed(dh, HOME()) + (foreign(x.cur) ? `<small class="orig">${signed(x.sh * (x.price - x.prev), x.cur)}</small>` : "") : x.prev ? signed(x.sh * (x.price - x.prev), x.cur) : "—")}${priv() ? ` <small>${pct(dayPct(x))}</small>` : ""}</b></div>
       <div><small>Since you bought</small><b class="${cls(g)}">${g != null ? P(homeMoney(g, x.cur, false, true)) + " (" + pct((x.price / x.cost - 1) * 100, 1) + ")" : "—"}</b></div></div>
       ${foreign(x.cur) && fxr(x.cur) != null ? `<p class="note">In ${esc(HOME())} at today's rate; the stock trades in ${esc(x.cur)}.</p>` : ""}
-      ${x.cost ? `<p class="note">Average price ${P(money(x.cost, x.cur))}${x.lots && x.lots.length > 1 ? " across your positions, at today's rates" : ""}</p>` : ""}
+      ${x.cost ? `<p class="note">Average price ${x.lots && x.lots.length === 1 && x.costCur !== (NORMC[x.cur] || [x.cur])[0] ? `${P(money(x.lots[0].cost, x.lots[0].cur))} paid in ${esc(x.lots[0].cur)} <small class="muted">(${P(money(x.cost, x.cur))} at today's rate)</small>` : P(money(x.cost, x.cur)) + (x.lots && x.lots.length > 1 ? " across your positions, at today's rates" : "")}</p>` : ""}
+      ${x.cost && foreign(x.cur) && !(x.lots && x.lots.length) ? `<p class="note">Your gain counts ${esc(x.s)}'s move in ${esc(x.cur)} only. If you paid in ${esc(HOME())}, your broker also counts the currency's move since you bought; to match it, <button class="link small" data-act="holding" data-v="${esc(x.s)}">enter what you paid in ${esc(HOME())}</button>.</p>` : ""}
       ${lotsHTML(x)}</section>`;
   }
   // Positions on other markets or in other currencies (same company, one stock in Stockit)
@@ -4255,14 +4281,14 @@ function clientApp() {
       if (it.kind === "extra") return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>Stockit</span><span>Broker</span><i></i></div>${row("Shares", nsh(it.mine.sh), "not shown", true)}${row("Price now", m2(it.mine.price, it.cur), "—", false)}</div>`;
       return `<div class="ck-cmp"><div class="ck-r hd"><span></span><span>${yh ? "Yahoo" : "Stockit"}</span><span>Broker</span><i></i></div>
         ${row("Shares", it.mine ? nsh(it.mine.sh) : "—", it.shot && it.shot.shares != null ? nsh(it.shot.shares) : dv.sh != null ? `${dv.exact ? "" : "≈ "}${nsh(dv.sh)} <small class="muted">from value</small>` : "—", it.diffs.includes("shares") || yh)}
-        ${row("Average price", it.mine && it.mine.cost ? m2(it.mine.cost, it.cur) : "—", it.shot && it.shot.avgPrice != null ? m2(it.shot.avgPrice, it.shotCur) : dv.cost != null ? `${m2(dv.cost, it.cur)} <small class="muted">from gain</small>` : "—", it.diffs.includes("cost") || yh)}
+        ${row("Average price", it.mine && it.mine.cost ? m2(it.mine.costIn || it.mine.cost, it.mine.costCur || it.cur) : "—", it.shot && it.shot.avgPrice != null ? m2(it.shot.avgPrice, it.shotCur) : dv.cost != null ? `${m2(dv.cost, dv.costCur || it.cur)} <small class="muted">from gain</small>` : "—", it.diffs.includes("cost") || yh)}
         ${it.shot && it.shot.value != null ? row("Position value", it.mine && it.mine.value != null && !yh ? m2(it.mine.value, dv.vc || it.cur) : "—", m2(it.shot.value, it.shot.valueCurrency || it.shotCur) + (it.shot.gain != null ? ` <small class="${it.shot.gain >= 0 ? "up" : "down"}">${it.shot.gain >= 0 ? "+" : "−"}${priv() ? "••••" : nf(Math.abs(it.shot.gain), 2)}${it.shot.gainPct != null ? " (" + pct(it.shot.gainPct, 2) + ")" : ""}</small>` : ""), it.diffs.includes("shares") || it.diffs.includes("value")) : ""}
         ${row("Price now", m2(it.mine ? it.mine.price : it.yahooPrice, it.cur), (it.shot ? m2(it.shot.price, it.shotCur) : "—") + (it.gap != null ? ` <small class="${it.diffs.includes("price") ? "down" : "muted"}">${pct(it.gap, 1)}</small>` : ""), it.diffs.includes("price"))}</div>`;
     };
     const card = it => {
       const st = ckStatus(it), [tone, label, why] = CK[st];
       const whyTxt = st === "differs" ? `Your broker shows a different ${it.diffs.filter(d => d !== "watch").map(d => ({ shares: "number of shares", cost: "average price", price: "price", value: "position value" }[d])).join(" and ")}.` + (it.diffs.includes("price") ? " " + CK.price[2] : "") : why;
-      const fields = it.suggest ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.cur)}</div>${it.converted ? `<p class="note">Average price converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}` : "";
+      const fields = it.suggest ? `<div class="ck-fs">${fld(it, "sh", "Shares", it.suggest.sh)}${fld(it, "cost", "Average price", it.suggest.cost, it.suggest.cur || it.cur)}</div>${it.converted ? `<p class="note">Average price converted from ${esc(it.shotCur)} at today's rate.</p>` : ""}` : "";
       const acts = it.resolved || st === "match" || st === "partial" ? "" : st === "missing" ? (it.s
           ? `${fields}<div class="aic-btns"><button class="sm primary" data-act="checkapply" data-v="${it.id}" data-k="add">Add to portfolio</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`
           : `<div class="aic-btns"><button class="sm primary" data-act="checkfind" data-v="${esc(it.shot.symbol || it.name)}">Find it</button><button class="sm" data-act="checkapply" data-v="${it.id}" data-k="ignore">Ignore</button></div>`)
@@ -4271,7 +4297,7 @@ function clientApp() {
       return `<article class="ck t-${tone} ${it.resolved ? "done" : ""}" id="ck-${it.id}"><div class="ck-h"><div class="r-l"><b class="sym">${esc(it.s || it.shot.symbol || "?")}</b><small>${esc(it.name || "")}</small></div>
           <span class="ck-b b-${tone}">${it.resolved ? "✓ " + esc(it.resolved) : label}</span></div>
         ${it.resolved || st === "match" ? "" : `<p class="ck-what">${whyTxt}${it.kind === "missing" && !it.s ? " Stockit couldn't find it on Yahoo Finance." : ""}</p>`}
-        ${cmp(it)}${it.dv && it.dv.sh != null && it.shot && it.shot.shares == null && !it.resolved ? `<p class="note">Shares worked out from the position's value ÷ its price${it.dv.same ? "" : `, through today's ${esc(it.dv.vc)} rate, so they're approximate`}.${it.dv.cost != null && it.shot.avgPrice == null ? " Average price from the value minus the gain." : !it.dv.same && it.shot.gain != null ? " The average price can't be worked out: your broker counts the gain at the exchange rates of the day you bought." : ""}</p>` : ""}${it.diffs.includes("value") ? `<p class="note">The shares and position value read from your screenshot don't add up; check them before you apply.</p>` : ""}${acts}</article>`;
+        ${cmp(it)}${it.dv && it.dv.sh != null && it.shot && it.shot.shares == null && !it.resolved ? `<p class="note">Shares worked out from the position's value ÷ its price${it.dv.same ? "" : `, through today's ${esc(it.dv.vc)} rate, so they're approximate`}.${it.dv.cost != null && it.shot.avgPrice == null ? (it.dv.costCur && it.dv.costCur !== (NORMC[it.cur] || [it.cur])[0] ? ` Average price from the value minus the gain: what you paid per share in ${esc(it.dv.costCur)}, which counts the currency's move since you bought, as your broker does.` : " Average price from the value minus the gain.") : ""}</p>` : ""}${it.diffs.includes("value") ? `<p class="note">The shares and position value read from your screenshot don't add up; check them before you apply.</p>` : ""}${acts}</article>`;
     };
     const chip = (k, n) => n ? `<span class="ck-b b-${CK[k][0]}">${CK[k][1]} <b>${n}</b></span>` : "";
     el.innerHTML = head + `<div class="sh-body">
@@ -4390,7 +4416,7 @@ function clientApp() {
         if (k === "remove" && ckArmed !== v) { ckArmed = v; renderCheck(); setTimeout(() => { if (ckArmed === v) { ckArmed = null; renderCheck(); } }, 3500); break; }
         ckArmed = null;
         const e2 = ckEdit[v] || {}, sh = e2.sh != null ? e2.sh : it.suggest && it.suggest.sh, cost = e2.cost != null ? e2.cost : it.suggest && it.suggest.cost;
-        send("checkapply", { id: v, k, sh, cost }); break;
+        send("checkapply", { id: v, k, sh, cost, cur: it.suggest && it.suggest.cur }); break;
       }
       case "checkfind": checkOpen = false; renderCheck(); addOpen = true; results = null; renderAdd(); { const q = $("#q"); if (q) { q.value = v; } } break;
       case "ideaexplain": ideaExplain = ideaExplain === v ? null : v; render(); break;
