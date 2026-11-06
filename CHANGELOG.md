@@ -2,6 +2,17 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.24.0 (2026-11-05): One company, several markets
+
+- 🌍 **Positions on several markets**: Hold the same company on another market or in another currency, under one stock, when Yahoo has no listing for it.
+
+**Changes**
+
+- A stock's page has + Add a position on another market or in another currency: shares, average price, its currency and where (for example Frankfurt)
+- Your positions lists each one with its value and gain in its own currency; tap one to change or remove it, and Edit shares asks which one
+- The stock's shares and average price add up all its positions (the average in the stock's own currency, at today's rates, updated with each refresh), so totals, the widget, the briefing and the portfolio check include them
+- A position's currency gets its exchange rate when you add it
+
 ## 1.23.0 (2026-11-05): The month on the widget
 
 - 📈 **Trend beside today**: Each widget ticker now shows its change over the last month, small, next to today's change.

@@ -4,6 +4,24 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.24.0",
+      "date": "2026-11-05",
+      "title": "One company, several markets",
+      "highlights": [
+        {
+          "icon": "🌍",
+          "title": "Positions on several markets",
+          "text": "Hold the same company on another market or in another currency, under one stock, when Yahoo has no listing for it."
+        }
+      ],
+      "changes": [
+        "A stock's page has + Add a position on another market or in another currency: shares, average price, its currency and where (for example Frankfurt)",
+        "Your positions lists each one with its value and gain in its own currency; tap one to change or remove it, and Edit shares asks which one",
+        "The stock's shares and average price add up all its positions (the average in the stock's own currency, at today's rates, updated with each refresh), so totals, the widget, the briefing and the portfolio check include them",
+        "A position's currency gets its exchange rate when you add it"
+      ]
+    },
+    {
       "version": "1.23.0",
       "date": "2026-11-05",
       "title": "The month on the widget",
