@@ -2,6 +2,16 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.25.0 (2026-11-06): Tickers you can tap
+
+- 🔗 **Tap a ticker in an article**: Tickers quoted in an article open that stock's page, right above the article.
+
+**Changes**
+
+- In the reader, tickers written as EXCHANGE:TICKER (NASDAQ:NRIX, NYSE: LLY, LSE:BARC, XETRA:SAP, HKEX:700…) and cashtags like $TSLA are links
+- A link opens the stock's page above the article, for any stock, on your lists or not; Add to watchlist or I own this are there, and closing it (Done or a pull down) returns to the article
+- Exchanges outside the US are written the Yahoo Finance way (BARC.L, SAP.DE, 0700.HK), and share classes like BRK.B become BRK-B
+
 ## 1.24.1 (2026-11-05): Gains that match your broker
 
 - 💶 **What you paid, in euros**: Enter a foreign stock's average price in the currency you paid, and its gain matches your broker's, currency move included.
