@@ -2,6 +2,14 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.27.1 (2026-11-06): Assessment, top right
+
+- ✦ **One tap, top right**: The portfolio assessment now sits beside the broker check, showing your last score.
+
+**Changes**
+
+- The ✦ Portfolio assessment button moved from under the briefing to the top right of the portfolio summary, beside the broker check; it shows your last score in its colour (green, amber or red) and pulses while an assessment runs
+
 ## 1.27.0 (2026-11-06): Your portfolio, assessed
 
 - ✦ **Portfolio assessment**: AI weighs every position, your plans and watchlist against the market's mood and world events.

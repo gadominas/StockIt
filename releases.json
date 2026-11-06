@@ -4,6 +4,21 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.27.1",
+      "date": "2026-11-06",
+      "title": "Assessment, top right",
+      "highlights": [
+        {
+          "icon": "✦",
+          "title": "One tap, top right",
+          "text": "The portfolio assessment now sits beside the broker check, showing your last score."
+        }
+      ],
+      "changes": [
+        "The ✦ Portfolio assessment button moved from under the briefing to the top right of the portfolio summary, beside the broker check; it shows your last score in its colour (green, amber or red) and pulses while an assessment runs"
+      ]
+    },
+    {
       "version": "1.27.0",
       "date": "2026-11-06",
       "title": "Your portfolio, assessed",
