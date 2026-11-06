@@ -4,6 +4,23 @@
   "script": "Stockit.js",
   "releases": [
     {
+      "version": "1.23.0",
+      "date": "2026-11-05",
+      "title": "The month on the widget",
+      "highlights": [
+        {
+          "icon": "📈",
+          "title": "Trend beside today",
+          "text": "Each widget ticker now shows its change over the last month, small, next to today's change."
+        }
+      ],
+      "changes": [
+        "Widget: beside each ticker, in smaller type, its change over the last month (from the close about 30 days ago); today's change stays on the right",
+        "Settings › Portfolio › Beside each widget ticker: 1 week, 2 weeks, 1 month (the default), 3 months or Off",
+        "The medium and large widgets say what the small number is in their footer (\"small: 1 month\"); the large widget's list is titled with it too"
+      ]
+    },
+    {
       "version": "1.22.0",
       "date": "2026-11-05",
       "title": "What insiders are doing",

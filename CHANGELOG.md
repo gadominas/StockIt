@@ -2,6 +2,16 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.23.0 (2026-11-05): The month on the widget
+
+- 📈 **Trend beside today**: Each widget ticker now shows its change over the last month, small, next to today's change.
+
+**Changes**
+
+- Widget: beside each ticker, in smaller type, its change over the last month (from the close about 30 days ago); today's change stays on the right
+- Settings › Portfolio › Beside each widget ticker: 1 week, 2 weeks, 1 month (the default), 3 months or Off
+- The medium and large widgets say what the small number is in their footer ("small: 1 month"); the large widget's list is titled with it too
+
 ## 1.22.0 (2026-11-05): What insiders are doing
 
 - 🏛 **Insider trades**: With a Quiver key, see what officers, directors and big owners bought and sold (SEC Form 4).
