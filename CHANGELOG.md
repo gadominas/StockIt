@@ -2,6 +2,21 @@
 
 All notable changes to Stockit. Generated from `releases.json`; edit that file, not this one.
 
+## 1.24.1 (2026-11-05): Gains that match your broker
+
+- 💶 **What you paid, in euros**: Enter a foreign stock's average price in the currency you paid, and its gain matches your broker's, currency move included.
+
+**Changes**
+
+- Edit shares asks for the currency of the average price; enter what you paid in euros for a Canadian, US or UK stock bought with euros
+- A stock's page shows the price you paid in its own currency and, small, what that is in the stock's currency today
+- For a foreign stock whose average price is in its own currency, the page explains why your broker may show a different gain, with a link to enter it in your currency
+- Check my portfolio works out what you paid per share in your currency from your broker's value and gain, and applies it in that currency
+
+**Fixes**
+
+- A foreign stock bought with euros showed a different gain from the broker's (Fortis: €147 instead of €181), because the average price was in Canadian dollars and converted at today's rate, leaving out the Canadian dollar's rise since the purchase
+
 ## 1.24.0 (2026-11-05): One company, several markets
 
 - 🌍 **Positions on several markets**: Hold the same company on another market or in another currency, under one stock, when Yahoo has no listing for it.
