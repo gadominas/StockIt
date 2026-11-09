@@ -1,0 +1,32 @@
+{
+  "name": "Stockit",
+  "accent": "#34D399",
+  "headline": [
+    "Track.",
+    "Read.",
+    "Decide."
+  ],
+  "sentence": "Your stocks go in. Prices, the news around them and a plain-English story of what's going on come out.",
+  "shots": [
+    {
+      "card": "02-briefing.png",
+      "y": 24
+    },
+    {
+      "card": "01-portfolio.png",
+      "y": 64
+    }
+  ],
+  "motif": {
+    "x": 0,
+    "y": 520,
+    "w": 592,
+    "rotate": 0,
+    "front": true,
+    "svg": "<svg viewBox='0 0 592 112' xmlns='http://www.w3.org/2000/svg'><path d='M8 104 L120 76 L210 92 L320 50 L400 62 L500 22 L540 18' fill='none' stroke='#F6F7F9' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='562' cy='16' r='16' fill='{accent}'/></svg>"
+  },
+  "benefit": "Know what moved your stocks, in plain English",
+  "steps": "Add your stocks. Open the briefing. Read it or listen.",
+  "facts": "Free · iPhone and iPad · Runs in the free Scriptable app · No account, no subscription · AI is optional, with your own Claude or OpenAI key",
+  "bannerAlt": "Stockit: Track. Read. Decide. Your stocks go in, prices, the news around them and a plain-English story come out. Two iPhone screens show a portfolio and an AI briefing, crossed by a white price line climbing to an emerald dot."
+}

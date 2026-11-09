@@ -1,14 +1,15 @@
+<!-- header:start: repo-site/tools/header.js writes this block from docs/site/header.json -->
 <div align="center">
 
-<img src="docs/logo.svg" width="112" alt="Stockit logo: a price line climbing through a faint chart frame to an emerald dot, with a blue average line underneath">
+<a href="#install"><img src="docs/banner.png" width="100%" alt="Stockit: Track. Read. Decide. Your stocks go in, prices, the news around them and a plain-English story come out. Two iPhone screens show a portfolio and an AI briefing, crossed by a white price line climbing to an emerald dot."></a>
 
-# Stockit
+<h2>Know what moved your stocks, in plain English</h2>
 
-**Track. Read. Decide.**
+Add your stocks. Open the briefing. Read it or listen.
 
-Your stocks, the news around them and a plain-English story of what's going on.<br>Prices, key numbers explained, a Flash of top headlines with a TL;DR for each, and an optional AI briefing you can listen to.
+<a href="#install"><img src="docs/button-install.png" height="48" alt="Install Stockit free"></a>&nbsp;&nbsp;<a href="CHANGELOG.md"><img src="docs/button-whats-new.png" height="48" alt="See what's new in Stockit"></a>
 
-An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No account, no server, no subscription.
+<sub>Free · iPhone and iPad · Runs in the free Scriptable app · No account, no subscription · AI is optional, with your own Claude or OpenAI key</sub>
 
 [![Version](https://img.shields.io/badge/version-1.27.1-1d4ed8)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/iOS-Scriptable-0f172a)](https://apps.apple.com/app/scriptable/id1405459188)
@@ -24,6 +25,7 @@ An iPhone and iPad app for [Scriptable](https://scriptable.app). One file. No ac
 <sub>Your portfolio with the daily briefing · the launch screen · a stock's page · the story behind a stock</sub>
 
 </div>
+<!-- header:end -->
 
 > [!IMPORTANT]
 > **Stockit is not a financial adviser, and nothing in it is financial advice.** Buy, hold and sell views are opinions an AI model writes from the prices, numbers and headlines shown in the app. They can be wrong, late or incomplete. Do your own research and talk to a licensed adviser before you invest. See [Not financial advice](#not-financial-advice).
